@@ -54,6 +54,7 @@ from crucible.loop.state import LoopState, event, round_id_for
 from crucible.loop.statistics import Proportion
 from crucible.repositories.attacks import AttackRepository
 from crucible.repositories.attempts import AttemptRepository
+from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RoundRepository
 from crucible.schemas.outcome import Outcome
 from crucible.services.cost_meter import BudgetExceeded, CostMeter
@@ -340,8 +341,18 @@ class CoEvolutionLoop:
         """Step 9: build and persist the RoundReport."""
         round_number = int(state["round_number"])
         report = await self._build_report(state)
+        after = self._config_after(state)
         async with self._parts.database.session() as session:
             await RoundRepository(session).record(report)
+            # Store D(n) by id, with the config it came from. Phase 8's layer
+            # ablation and cross-round comparisons address configs this way.
+            await DefenseConfigRepository(session).save(
+                after,
+                round_number=round_number,
+                run_id=uuid.UUID(str(state["run_id"])),
+                parent_config_id=state["current_config"].fingerprint(),
+                label=f"D({round_number})",
+            )
 
         reports = [*state.get("reports", []), report]
         signals = [

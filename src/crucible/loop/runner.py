@@ -40,6 +40,7 @@ from crucible.loop.graph import CoEvolutionLoop, LoopComponents
 from crucible.loop.reports import HaltReason, RoundReport, RunReport, RunStatus
 from crucible.loop.state import LoopState
 from crucible.oracle import Oracle
+from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RoundRepository, RunRepository
 from crucible.repositories.spend import DatabaseSpendRepository
 from crucible.services.cost_meter import BudgetExceeded, CostMeter, ModelPrice
@@ -214,6 +215,7 @@ class LoopRunner:
             logger.warning("loop.budget_exceeded", extra={"node": "baseline_utility"})
             baseline_rate = 1.0
         async with self._database.session() as session:
+            await DefenseConfigRepository(session).save(config, label="D(0)")
             await RunRepository(session).create(
                 run_id=run,
                 attacker_mode=self._settings.mode.value,

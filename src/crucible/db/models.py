@@ -368,3 +368,32 @@ class RoundRow(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (UniqueConstraint("run_id", "round_number", name="uq_rounds_run_round"),)
+
+
+class DefenseConfigRow(Base):
+    """Every `DefenseConfig` the loop has ever used, addressable by id.
+
+    The id is the config's own content fingerprint, which is what the outcome
+    cache keys on, so a config is stored exactly once however many rounds use
+    it. Phase 8's layer ablation replays the final archive against configs with
+    individual layers disabled, and the cross-round ablation compares configs by
+    id — neither is possible without this table.
+    """
+
+    __tablename__ = "defense_configs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    #: The round that selected it. NULL for D(0) and for hand-written configs.
+    round_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    #: The config this one was derived from. NULL for D(0).
+    parent_config_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("defense_configs.id", ondelete="SET NULL"), nullable=True
+    )
+    label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

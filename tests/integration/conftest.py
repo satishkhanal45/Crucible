@@ -9,19 +9,38 @@ from __future__ import annotations
 import asyncio
 import os
 import random
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from crucible.archive.seeds import load_seed_attacks
 from crucible.archive.service import ArchiveService
+from crucible.attacker.state import AttackerMode
 from crucible.config import Settings, load_settings
 from crucible.db.session import Database
+from crucible.defender.state import DefenderState
+from crucible.defenses.config import DefenseConfig
+from crucible.evaluation.benign import load_benign_tasks
+from crucible.loop.runner import LoopFactories, LoopRunner, LoopSettings, build_components
+from crucible.schemas.attack import Attack
 from crucible.services.embeddings import HashingEmbedder
+from crucible.target.reference.llm import ScriptedTargetLLM
+from tests.fixtures.loop_harness import (
+    HARDENED,
+    CyclingAttackerLLM,
+    Harness,
+    RecordingDefenderState,
+    ScriptedProposals,
+    classifier_client,
+    corpus_subset,
+)
 
 POSTGRES_IMAGE = "pgvector/pgvector:pg16"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -115,4 +134,83 @@ async def archive(database_url: str, migrated: Config) -> AsyncIterator[ArchiveS
                 await session.execute(text(f"DELETE FROM {table}"))
         yield ArchiveService(database, HashingEmbedder(), rng=random.Random(20260903))
     finally:
+        await database.close()
+
+
+@pytest.fixture
+async def build_loop(
+    database_url: str, migrated: Config, archive: ArchiveService
+) -> AsyncIterator[Callable[..., object]]:
+    """Builds a loop over a freshly seeded archive."""
+    del migrated
+    databases: list[Database] = []
+
+    async def _build(
+        *,
+        rounds: int = 1,
+        configs: list[DefenseConfig] | None = None,
+        payloads: list[str] | None = None,
+        budget: Decimal = Decimal("50.00"),
+        seed_attacks: list[Attack] | None = None,
+        force_holdout: bool | None = None,
+        cells_per_round: int = 2,
+        candidates: int = 3,
+        utility_tasks: int = 4,
+    ) -> Harness:
+        database = Database(database_url)
+        databases.append(database)
+
+        attacker_llm = CyclingAttackerLLM(payloads)
+        defender_llm = ScriptedProposals(configs or [HARDENED])
+        settings = LoopSettings(
+            rounds=rounds,
+            mode=AttackerMode.BLACK_BOX,
+            budget_usd=budget,
+            concurrency=1,
+            candidates_per_round=candidates,
+            cells_per_round=cells_per_round,
+        )
+        components = await build_components(
+            database,
+            settings=settings,
+            factories=LoopFactories(
+                target_llm=ScriptedTargetLLM,
+                attacker_llm=lambda: attacker_llm,
+                defender_llm=lambda: defender_llm,
+                classifier_client=classifier_client,
+            ),
+            embedder=HashingEmbedder(),
+            corpus=corpus_subset(),
+        )
+        components.evaluation._tasks = load_benign_tasks()[:utility_tasks]
+
+        recorded = RecordingDefenderState()
+        original_run = components.defender.run
+
+        async def recording_run(state: DefenderState) -> DefenderState:
+            recorded.states.append(dict(state))  # type: ignore[arg-type]
+            return await original_run(state)
+
+        components.defender.run = recording_run  # type: ignore[method-assign]
+
+        # Seeded through the run's own archive service, so the holdout split is
+        # reproducible from the run seed.
+        await components.archive.admit_many(
+            seed_attacks or load_seed_attacks()[:6],
+            round_number=0,
+            holdout=force_holdout,
+        )
+        runner = LoopRunner(database, components, settings=settings, checkpointer=InMemorySaver())
+        return Harness(
+            runner=runner,
+            database=database,
+            archive=archive,
+            attacker_llm=attacker_llm,
+            defender_llm=defender_llm,
+            defender_states=recorded,
+        )
+
+    yield _build
+
+    for database in databases:
         await database.close()

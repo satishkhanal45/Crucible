@@ -20,6 +20,7 @@ import uuid
 from contextlib import AsyncExitStack
 from decimal import Decimal
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -30,6 +31,7 @@ from crucible.archive.classifier import ScriptedClassifierClient
 from crucible.attacker.llm import ScriptedAttackerLLM
 from crucible.attacker.state import AttackerMode
 from crucible.cli import archive as archive_cli
+from crucible.cli import reclassify as reclassify_cli
 from crucible.cli import seed as seed_cli
 from crucible.config import Settings, get_settings
 from crucible.db.session import Database
@@ -46,7 +48,12 @@ from crucible.loop.runner import (
     load_run_report,
     postgres_checkpointer,
 )
-from crucible.repositories.rounds import RoundRepository, RunRepository
+from crucible.reporting.charts import coverage_grid, coverage_strip, three_curves
+from crucible.reporting.data import ReportData, gather
+from crucible.reporting.markdown import render_round_report, render_run_report
+from crucible.reporting.redaction import present_payload
+from crucible.repositories.configs import DefenseConfigRepository
+from crucible.repositories.rounds import RunRepository
 from crucible.target.reference.llm import ScriptedTargetLLM
 
 console = Console()
@@ -96,6 +103,22 @@ def _scripted_factories() -> LoopFactories:
 def seed() -> None:
     """Load the corpus, plant canaries, load seed attacks, verify placement."""
     raise typer.Exit(code=seed_cli.main())
+
+
+@archive_app.command("reclassify")
+def archive_reclassify(
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run/--no-dry-run", help="Never writes to the archive.")
+    ] = True,
+    model: Annotated[str, typer.Option("--model")] = reclassify_cli.DEFAULT_MODEL,
+) -> None:
+    """Run the REAL classifier over the 40 committed seeds and report agreement.
+
+    Makes live API calls. Coverage and the coverage grid are only as trustworthy
+    as the number this prints.
+    """
+    settings = _settings()
+    asyncio.run(reclassify_cli.reclassify(settings, console, dry_run=dry_run, model=model))
 
 
 @archive_app.command("stats")
@@ -257,24 +280,23 @@ def eval_defense(
     config_id: Annotated[str, typer.Argument(help="A DefenseConfig fingerprint.")],
     which: Annotated[EvalSet, typer.Option("--set")] = EvalSet.ARCHIVE,
 ) -> None:
-    """Evaluate one config against the archive, the holdout set, or utility.
-
-    TODO(phase-7): resolve a fingerprint to its stored config. Until the
-    `defense_configs` table exists, only the empty config can be named.
-    """
+    """Evaluate one stored config against the archive, the holdout set, or utility."""
     settings = _settings()
-    if config_id != DefenseConfig.empty().fingerprint():
-        console.print(
-            f"[yellow]only the empty config ({DefenseConfig.empty().fingerprint()}) can be "
-            "resolved until Phase 7 stores configs by id[/yellow]"
-        )
-        raise typer.Exit(code=1)
-    asyncio.run(_eval(settings, DefenseConfig.empty(), which))
+    asyncio.run(_eval(settings, config_id, which))
 
 
-async def _eval(settings: Settings, config: DefenseConfig, which: EvalSet) -> None:
+async def _eval(settings: Settings, config_id: str, which: EvalSet) -> None:
     database = Database(settings.DATABASE_URL)
     try:
+        async with database.session() as session:
+            config = await DefenseConfigRepository(session).get(config_id)
+        if config is None:
+            console.print(
+                f"[red]no config {config_id}[/red]. Stored configs: "
+                "`crucible report run --run-id <id>` lists the ones a run used."
+            )
+            raise typer.Exit(code=1)
+
         loop_settings = LoopSettings()
         components = await build_components(
             database,
@@ -310,21 +332,32 @@ async def _eval(settings: Settings, config: DefenseConfig, which: EvalSet) -> No
 def report_round(
     number: Annotated[int, typer.Argument(help="Round number.")],
     run_id: Annotated[str, typer.Option("--run-id")],
+    include_payloads: Annotated[
+        bool, typer.Option("--include-payloads", help="Publish raw payload text.")
+    ] = False,
+    out: Annotated[str | None, typer.Option("--out", help="Write to a file.")] = None,
 ) -> None:
-    """Print one round's report. Phase 7 does the real reporting."""
+    """One round: its rates and the structured config diff that produced it."""
     settings = _settings()
-    asyncio.run(_report_round(settings, uuid.UUID(run_id), number))
+    asyncio.run(_report_round(settings, uuid.UUID(run_id), number, include_payloads, out))
 
 
-async def _report_round(settings: Settings, run_id: uuid.UUID, number: int) -> None:
+async def _report_round(
+    settings: Settings,
+    run_id: uuid.UUID,
+    number: int,
+    include_payloads: bool,
+    out: str | None,
+) -> None:
     database = Database(settings.DATABASE_URL)
     try:
-        async with database.session() as session:
-            report = await RoundRepository(session).get(run_id, number)
-        if report is None:
-            console.print(f"[red]no round {number} for run {run_id}[/red]")
-            return
-        console.print(report.summary())
+        data = await gather(database, run_id)
+        if data is None:
+            console.print(f"[red]no run {run_id}[/red]")
+            raise typer.Exit(code=1)
+        del include_payloads  # a round report carries no payloads
+        text = render_round_report(data, number)
+        _emit(text, out)
     finally:
         await database.close()
 
@@ -333,34 +366,110 @@ async def _report_round(settings: Settings, run_id: uuid.UUID, number: int) -> N
 def report_run(
     run_id: Annotated[str, typer.Option("--run-id")],
     output: Annotated[ReportFormat, typer.Option("--format")] = ReportFormat.MD,
+    include_payloads: Annotated[
+        bool, typer.Option("--include-payloads", help="Publish raw payload text.")
+    ] = False,
+    out: Annotated[str | None, typer.Option("--out", help="Write to a file.")] = None,
+    charts: Annotated[
+        str | None, typer.Option("--charts", help="Directory for the generated visuals.")
+    ] = None,
 ) -> None:
-    """Print a whole run. Markdown or JSON; Phase 7 does the real reporting."""
+    """The whole run, as the Markdown document that goes in the repository."""
     settings = _settings()
-    asyncio.run(_report_run(settings, uuid.UUID(run_id), output))
+    asyncio.run(_report_run(settings, uuid.UUID(run_id), output, include_payloads, out, charts))
 
 
-async def _report_run(settings: Settings, run_id: uuid.UUID, output: ReportFormat) -> None:
+async def _report_run(
+    settings: Settings,
+    run_id: uuid.UUID,
+    output: ReportFormat,
+    include_payloads: bool,
+    out: str | None,
+    charts: str | None,
+) -> None:
     database = Database(settings.DATABASE_URL)
     try:
-        report = await load_run_report(database, run_id)
-        if report is None:
+        data = await gather(database, run_id)
+        if data is None:
             console.print(f"[red]no run {run_id}[/red]")
-            return
+            raise typer.Exit(code=1)
+
         if output is ReportFormat.JSON:
-            console.print_json(json.dumps(report.model_dump(mode="json")))
-            return
-        console.print(f"# Run {report.run_id}\n")
-        console.print(f"- status: {report.status.value}")
-        console.print(f"- mode: {report.attacker_mode}")
-        console.print(f"- rounds: {report.rounds_completed}")
-        console.print(f"- regressions: {report.total_regressions}")
-        if report.halt_reason:
-            console.print(f"- halted: {report.halt_reason.value}")
-        for round_report in report.rounds:
-            console.print("")
-            console.print(round_report.summary())
+            payload = {
+                "run": data.run.model_dump(mode="json"),
+                "coverage": {
+                    "occupied": data.coverage.occupied,
+                    "denominator": data.coverage.denominator,
+                },
+                "archive_size": data.archive_size,
+                "holdout_size": data.holdout_size,
+                "top_general": [
+                    {
+                        "attack_id": str(item.attack.id),
+                        "cell_key": item.attack.cell_key,
+                        "generality": item.generality,
+                        "mechanism": present_payload(
+                            item.attack.payload,
+                            objective=(
+                                item.attack.objective.value if item.attack.objective else None
+                            ),
+                            vector=item.attack.vector.value,
+                            technique=(
+                                item.attack.technique.value if item.attack.technique else None
+                            ),
+                            include_payloads=include_payloads,
+                        ),
+                    }
+                    for item in data.top_general
+                ],
+            }
+            _emit(json.dumps(payload, indent=2, sort_keys=True), out)
+        else:
+            _emit(render_run_report(data, include_payloads=include_payloads), out)
+
+        if charts:
+            written = _write_charts(data, Path(charts))
+            for path in written:
+                console.print(f"[green]wrote[/green] {path}")
     finally:
         await database.close()
+
+
+def _write_charts(data: ReportData, directory: Path) -> list[Path]:
+    """The three curves, the coverage grid, and the per-round strip."""
+    fitness = {
+        cell.cell_key: float(cell.elite_fitness)
+        for cell in data.cells
+        if cell.elite_fitness is not None
+    }
+    occupancy: dict[str, int] = {}
+    for attack in data.attacks:
+        if attack.cell_key:
+            occupancy[attack.cell_key] = occupancy.get(attack.cell_key, 0) + 1
+
+    per_round: list[tuple[int, dict[str, int]]] = []
+    for report in data.rounds:
+        upto: dict[str, int] = {}
+        for attack in data.attacks:
+            if attack.cell_key and attack.round_generated <= report.round_number:
+                upto[attack.cell_key] = upto.get(attack.cell_key, 0) + 1
+        per_round.append((report.round_number, upto))
+
+    return [
+        three_curves(data.rounds, directory / "three_curves.png"),
+        coverage_grid(fitness, occupancy, directory / "coverage_grid.png", title="Final coverage"),
+        coverage_strip(per_round, directory / "coverage_evolution.png"),
+    ]
+
+
+def _emit(text: str, out: str | None) -> None:
+    if out:
+        path = Path(out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        console.print(f"[green]wrote[/green] {path}")
+        return
+    print(text)
 
 
 def main() -> None:

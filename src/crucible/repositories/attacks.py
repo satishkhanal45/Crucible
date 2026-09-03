@@ -252,6 +252,22 @@ class AttackRepository:
         )
         return set(rows.scalars().all())
 
+    async def attempt_totals(self) -> dict[uuid.UUID, tuple[int, int]]:
+        """Attempts and breaches per attack, counted from the attempts themselves.
+
+        `AttackRow.total_attempts` counts only the generation path, so a seed
+        attack that has been re-evaluated every round still reads zero there.
+        Reporting needs the number that actually backs the ranking.
+        """
+        rows = await self._session.execute(
+            select(
+                Attempt.attack_id,
+                func.count().label("attempts"),
+                func.count().filter(Attempt.outcome == Outcome.BREACHED.value).label("breaches"),
+            ).group_by(Attempt.attack_id)
+        )
+        return {row.attack_id: (int(row.attempts), int(row.breaches)) for row in rows}
+
     async def all_config_ids(self) -> set[str]:
         """Every defense config that has ever been evaluated."""
         rows = await self._session.execute(select(Attempt.defense_config_id).distinct())

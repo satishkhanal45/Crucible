@@ -18,6 +18,7 @@ import re
 import uuid
 from typing import Protocol, runtime_checkable
 
+import httpx
 from pydantic import BaseModel, ConfigDict
 
 from crucible.logging import get_logger
@@ -159,6 +160,33 @@ class ScriptedClassifierClient:
             text=text,
             usage=TokenUsage(prompt_tokens=max(1, len(prompt) // 4), completion_tokens=16),
         )
+
+
+class GroqClassifierClient:
+    """The real classifier, on Groq's chat completions API.
+
+    It reuses the target's Groq client rather than duplicating the HTTP call;
+    only the message shape differs. Every call is metered by `TaxonomyClassifier`.
+    """
+
+    def __init__(self, api_key: str, client: httpx.AsyncClient, *, model: str) -> None:
+        from crucible.target.reference.llm import GroqTargetLLM
+
+        self._inner = GroqTargetLLM(api_key, client, model=model)
+
+    @property
+    def provider(self) -> str:
+        return self._inner.provider
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    async def complete(self, prompt: str) -> ClassifierReply:
+        from crucible.target.reference.llm import LLMMessage
+
+        reply = await self._inner.complete([LLMMessage(role="user", content=prompt)], ())
+        return ClassifierReply(text=reply.text, usage=reply.usage)
 
 
 class TaxonomyClassifier:
