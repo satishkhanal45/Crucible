@@ -1,0 +1,119 @@
+"""The attacker's model boundary. Every call goes through `CostMeter`."""
+
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Protocol, runtime_checkable
+
+import httpx
+from pydantic import BaseModel, ConfigDict
+
+from crucible.schemas.spend import TokenUsage
+from crucible.services.cost_meter import CostMeter, MeteredResult
+from crucible.target.reference.llm import GroqTargetLLM, LLMMessage
+
+
+class AttackerReply(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    usage: TokenUsage = TokenUsage(prompt_tokens=0, completion_tokens=0)
+
+
+@runtime_checkable
+class AttackerLLM(Protocol):
+    @property
+    def provider(self) -> str: ...
+
+    @property
+    def model(self) -> str: ...
+
+    async def complete(self, prompt: str) -> AttackerReply: ...
+
+
+class ScriptedAttackerLLM:
+    """Deterministic stand-in. Replies are handed to it in order."""
+
+    def __init__(self, replies: list[str] | None = None, *, model: str = "scripted-attacker"):
+        self._replies = list(replies or [])
+        self._model = model
+        #: Every prompt this client has seen, for the isolation assertions.
+        self.prompts: list[str] = []
+
+    @property
+    def provider(self) -> str:
+        return "stub"
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def queue(self, reply: str) -> None:
+        self._replies.append(reply)
+
+    async def complete(self, prompt: str) -> AttackerReply:
+        self.prompts.append(prompt)
+        text = self._replies.pop(0) if self._replies else json.dumps({"strategy": "no idea"})
+        return AttackerReply(
+            text=text,
+            usage=TokenUsage(prompt_tokens=max(1, len(prompt) // 4), completion_tokens=96),
+        )
+
+
+class GroqAttackerLLM:
+    """Groq chat completions, reusing the target's client."""
+
+    def __init__(self, api_key: str, client: httpx.AsyncClient, *, model: str) -> None:
+        self._inner = GroqTargetLLM(api_key, client, model=model)
+
+    @property
+    def provider(self) -> str:
+        return self._inner.provider
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    async def complete(self, prompt: str) -> AttackerReply:
+        reply = await self._inner.complete([LLMMessage(role="user", content=prompt)], ())
+        return AttackerReply(text=reply.text, usage=reply.usage)
+
+
+class MeteredAttackerLLM:
+    """Routes every attacker call through `CostMeter`.
+
+    `BudgetExceeded` propagates: the graph catches it and ends the round with
+    whatever it has, rather than crashing mid-generation.
+    """
+
+    def __init__(
+        self, inner: AttackerLLM, cost_meter: CostMeter, *, round_id: uuid.UUID | None = None
+    ) -> None:
+        self._inner = inner
+        self._meter = cost_meter
+        self._round_id = round_id
+
+    @property
+    def provider(self) -> str:
+        return self._inner.provider
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    @property
+    def inner(self) -> AttackerLLM:
+        return self._inner
+
+    async def complete(self, prompt: str) -> AttackerReply:
+        async def call() -> MeteredResult[AttackerReply]:
+            reply = await self._inner.complete(prompt)
+            return MeteredResult(value=reply, usage=reply.usage)
+
+        return await self._meter.call(
+            call,
+            round_id=self._round_id,
+            provider=self._inner.provider,
+            model=self._inner.model,
+        )

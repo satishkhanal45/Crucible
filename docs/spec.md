@@ -61,6 +61,7 @@ Anything here can be added later without redesign. Do not delete the seams.
 | D5 | Layer 1 classifier | `input.classifier` schema already exists. Wire the call, cache per `(text_hash, model, threshold)` or costs explode. |
 | D6 | Full 60/15 benign set, 15 rounds, 50-sample taxonomy check | Data and config only, no code changes. |
 | D7 | Black-box vs white-box experiment | Experiment 5. Needs only a second run config. |
+| D8 | Approximate novelty k-NN | Novelty k-NN is an exact scan. Approximate HNSW becomes necessary above ~20k archive entries, at a measured recall cost of 0.24-0.52 at k=15. Decision of the technical director: novelty pressure is never-cut, and a corrupted novelty gate is worse than a slower one. This is a limitation for `docs/findings.md`, not a defect. |
 
 ## 5. Vocabulary (use these exact terms in code)
 

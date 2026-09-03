@@ -52,8 +52,17 @@ class AttackRepository:
     async def get_attacks_for_mutation(
         self, *, limit: int | None = None, cell_keys: Sequence[str] | None = None
     ) -> list[ArchivedAttack]:
-        """The mutation pool: cell elites, never holdout, never retired."""
-        statement = (
+        """The mutation pool: cell elites, never holdout, never retired.
+
+        A cell only gets an elite once an attack in it has been executed and
+        scored, so a freshly seeded archive has none at all. Rather than hand the
+        attacker an empty pool on round one, this falls back to the archive
+        itself, still filtered to non-holdout and non-retired attacks and ordered
+        so that anything with a breach history comes first. The holdout filter is
+        the same in both branches — that is the property this method exists to
+        guarantee, and it has no bypass in either path.
+        """
+        elites = (
             select(AttackRow)
             .join(CellRow, CellRow.elite_attack_id == AttackRow.id)
             .where(AttackRow.is_holdout.is_(False))
@@ -61,8 +70,20 @@ class AttackRepository:
             .order_by(CellRow.elite_fitness.desc(), AttackRow.id)
         )
         if cell_keys:
-            statement = statement.where(CellRow.cell_key.in_(list(cell_keys)))
-        return await self._fetch(statement, limit)
+            elites = elites.where(CellRow.cell_key.in_(list(cell_keys)))
+        pool = await self._fetch(elites, limit)
+        if pool:
+            return pool
+
+        fallback = (
+            select(AttackRow)
+            .where(AttackRow.is_holdout.is_(False))
+            .where(AttackRow.retired.is_(False))
+            .order_by(AttackRow.total_breaches.desc(), AttackRow.created_at, AttackRow.id)
+        )
+        if cell_keys:
+            fallback = fallback.where(AttackRow.cell_key.in_(list(cell_keys)))
+        return await self._fetch(fallback, limit)
 
     async def get_attacks_for_defender(
         self,
@@ -105,6 +126,8 @@ class AttackRepository:
             id=attack.attack_id,
             round_generated=entry.round_generated,
             parent_id=attack.parent_id,
+            recombined_with=attack.recombined_with,
+            mutation_operator=attack.mutation_operator,
             payload=attack.payload,
             vector=attack.vector.value,
             objective=attack.objective.value if attack.objective else None,

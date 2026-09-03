@@ -43,6 +43,11 @@ class Attack(BaseModel):
 
     #: Lineage. Seeds have no parent; everything else is a mutation of an elite.
     parent_id: uuid.UUID | None = None
+    #: The second parent, for operators that combine two attacks.
+    recombined_with: uuid.UUID | None = None
+    #: Which named mutation operator produced this attack. `None` for seeds.
+    #: Named operators are what make the search legible in the writeup.
+    mutation_operator: str | None = None
     #: 0 for seeds, otherwise the round that generated this attack.
     round_generated: int = Field(default=0, ge=0)
 

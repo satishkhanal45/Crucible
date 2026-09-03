@@ -358,3 +358,23 @@ def _distribution(scores: Sequence[float], threshold: float) -> NoveltyDistribut
         maximum=ordered[-1],
         below_threshold=sum(1 for value in ordered if value < threshold),
     )
+
+
+class BoundNoveltyGate:
+    """The Phase 3 admission gate with its defense and executor already bound.
+
+    The attacker calls `submit(attack)` and never holds a `DefenseConfig`: in
+    black-box mode it must not be able to reach one even by accident.
+    """
+
+    def __init__(
+        self, archive: ArchiveService, defense: DefenseConfig, executor: AttemptRunner
+    ) -> None:
+        self._archive = archive
+        self._defense = defense
+        self._executor = executor
+
+    async def submit(self, attack: Attack, *, round_number: int = 0) -> Submission:
+        return await self._archive.submit(
+            attack, self._defense, self._executor, round_number=round_number
+        )

@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+from crucible.archive.holdout import HoldoutLeak
+from crucible.archive.holdout import assert_no_holdout as _assert_no_holdout
 from crucible.defender.state import BreachSummary, Cluster, Hypothesis
 from crucible.defenses.config import (
     REFUSAL_TEMPLATES,
@@ -26,24 +28,22 @@ from crucible.defenses.config import (
 )
 from crucible.target.canary import assert_no_canaries
 
+__all__ = [
+    "HoldoutLeak",
+    "assert_no_holdout",
+    "build_hypothesis_prompt",
+    "build_proposal_prompt",
+    "describe_config",
+]
+
 #: Payloads are quoted to the defender so it can reason about mechanism, but a
 #: whole corpus of them would blow the context window and the budget.
 PAYLOAD_EXCERPT_CHARS = 400
 
 
-class HoldoutLeak(RuntimeError):
-    """A holdout attack was about to reach a defender prompt."""
-
-
 def assert_no_holdout(breaches: Sequence[BreachSummary]) -> None:
     """The defender may never see a holdout attack. Checked here as well as in SQL."""
-    leaked = [str(breach.attack_id) for breach in breaches if breach.is_holdout]
-    if leaked:
-        raise HoldoutLeak(
-            "holdout attacks reached the defender: "
-            f"{', '.join(leaked)}. The holdout set is the only honest generalization "
-            "number in the project; showing it to the defender destroys it"
-        )
+    _assert_no_holdout(breaches, where="a defender prompt")
 
 
 def _guard(prompt: str) -> str:

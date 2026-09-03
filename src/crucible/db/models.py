@@ -200,6 +200,12 @@ class AttackRow(Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("attacks.id", ondelete="SET NULL"), nullable=True
     )
+    #: The second parent, for operators that combine two attacks.
+    recombined_with: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("attacks.id", ondelete="SET NULL"), nullable=True
+    )
+    #: Which named mutation operator produced this attack. NULL for seeds.
+    mutation_operator: Mapped[str | None] = mapped_column(String(32), nullable=True)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     #: Only the two executable vectors are storable; D3 vectors are rejected.
     vector: Mapped[str] = mapped_column(String(32), nullable=False)

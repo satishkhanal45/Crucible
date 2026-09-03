@@ -107,17 +107,16 @@ work committed.
 
 <!-- Keep this section current. Update it at the end of every session. -->
 
-- **Current phase:** 4 — Attacker agent
-- **Phase status:** Phases 0–3 and 5 complete; Phase 4 not started (build order
-  is 0 → 1 → 2 → 3 → 5 → 4 → 6 → 7 → 8)
-- **Effort spent:** 8.0 / 13.0 units
-- **Last completed:** Phase 5 — the five-layer defense stack and the defender
-  agent (tasks 1–7), verification tests 1–23 green. End-to-end against the 40
-  seed attacks: the empty baseline blocks 65.6% (holdout 75.0%), a hand-written
-  reasonable config blocks 93.8% (holdout 87.5%) at 100% utility, objective
-  score +0.8375
-- **Next up:** Phase 4 — the attacker agent. The archive, the novelty gate, the
-  defense stack, and the evaluation service are all in place for it to plug into.
+- **Current phase:** 6 — Loop orchestration
+- **Phase status:** Phases 0–5 complete; Phase 6 not started
+- **Effort spent:** 9.5 / 13.0 units
+- **Last completed:** Phase 4 — the attacker agent (tasks 1–6), verification
+  tests 1–17 green. One stubbed round against the 40-seed archive: 6 candidates
+  generated, 0 novelty-rejected, 2 critique-rejected, 4 accepted, coverage
+  unchanged at 40/96 and never decreasing
+- **Next up:** Phase 6 — round orchestration. Both agents, the archive gate, the
+  executor, and the evaluation service exist; the loop wires them into the
+  ten-step round algorithm in `docs/spec.md` §13 with collapse detection.
 - **Open issues / blockers:** none. Notes for whoever picks this up:
   - `docs/spec.md` §7 wins over `project_context.md` on canary placement: one
     canary class per location, so the system prompt carries `SYSPROMPT_CANARY`
@@ -135,13 +134,16 @@ work committed.
     See the docstring in `crucible/oracle/tier1.py`.
   - Attempt traces contain that attempt's canary values, because replay needs
     them. Phase 7 must redact `trace.canaries` and `trace.attempt.payload`.
-  - **The archive's HNSW index cannot be both used and exact.** Measured on a
-    5000-row, 384-dimension archive: `ef_search` 40 → index used, recall 0.48;
+  - **Novelty k-NN is an exact scan, by decision of the technical director.**
+    The archive's HNSW index cannot be both used and exact: measured on a
+    5000-row, 384-dimension archive, `ef_search` 40 → index used, recall 0.48;
     100 → index used, recall 0.76; 200 → exact scan, recall 0.93; 1000 → exact
-    scan, recall 1.00. Novelty gates execution, so it runs at `ef_search=1000`
-    (exact, reproducible) and the index is kept for scale. Ordering breaks ties
-    on attack id, in Python, after an index-friendly single-key `ORDER BY`.
-    Revisit only with numbers, not intuition.
+    scan, recall 1.00. Novelty pressure is never-cut, so novelty runs at
+    `ef_search=1000` (exact, reproducible) and the index is kept for scale.
+    Ordering breaks ties on attack id, in Python, after an index-friendly
+    single-key `ORDER BY`. Approximate search becomes necessary above ~20k
+    archive entries: that is deferred item **D8** in `docs/spec.md` §4 and a
+    stated limitation in findings, not a defect. Revisit only with numbers.
   - `generality` is 0.0 when there are no past defense configs. Phase 5 creates
     the first ones; do not change the zero case to 1.0, which would inflate
     every fitness score in the archive.
@@ -157,6 +159,16 @@ work committed.
   - The benign task expectations in `data/benign_tasks.yaml` were recorded
     against the reference target with the hashing embedder. Changing the corpus,
     the retrieval threshold, or the embedding model requires re-recording them.
+  - **The mutation pool falls back to the archive when no cell has an elite.**
+    Cells only get elites once an attack in them has been executed and scored, so
+    a freshly seeded archive would otherwise hand the attacker nothing on round
+    one. Both branches of `get_attacks_for_mutation()` filter `is_holdout` in
+    SQL — that is the property the method exists for, and neither path has a
+    bypass.
+  - `self_critique` runs *after* the novelty gate, per the Phase 4 edge order, so
+    a candidate it rejects has already been admitted and executed. It stays in
+    the archive with its real outcome; it just does not count as the round's
+    product.
   - `EvaluationService` reads the archive through `list_non_holdout()` and
     `list_holdout()`, which are **not** agent-safe methods. Holdout block rate is
     impossible otherwise, and widening an agent-facing method would weaken the
@@ -175,7 +187,7 @@ work committed.
 | 2 | complete | 1.5 | Attack/taxonomy schemas with D3 vector rejection, `direct` and `indirect_document` delivery, Tier 1 (deterministic) and Tier 2 (rule-based) oracle with a Tier 3 stub and clean D4 seam, `combine()` plus aggregate warning above 15% inconclusive, execution sandbox (reset/plant/deliver/judge/persist/reset) with wall-clock timeouts as `error`, egress guard wiring, a bounded pool of namespace-isolated targets, `replay()`, and the `(attack_id, defense_config_id)` outcome cache. 257 tests green. |
 | 3 | complete | 1.5 | 96-cell MAP-Elites grid with coverage that always prints its denominator, taxonomy classifier (one retry then `unclassified`, via CostMeter), `attacks`/`cells`/`novelty_rejections` schema with an HNSW index, k=15 novelty with `MIN_NOVELTY` rejection *before* execution, fitness with generality over all past configs, elites, holdout enforced in the repository layer, 40 committed seed attacks covering 40/96 cells, and `crucible archive stats`. 351 tests green. |
 | 5 | complete | 2.0 | Real five-layer `DefenseConfig` (fixed detector classes, template-bounded refusal text, order-independent fingerprint), all five layers wired into the reference target, argument-provenance tracing for `require_user_origin_for_privileged`, 40 benign tasks with 12 hard negatives, standalone evaluation service with explicit screening/full scopes, and a LangGraph defender (triage → hypothesize → propose fan-out → validate → evaluate → select, capped retry). 432 tests green. |
-| 4 | not started | | |
+| 4 | complete | 1.5 | LangGraph attacker (survey → select_parents → strategize → generate fan-out → novelty_filter → self_critique → capped regenerate), six named mutation operators with full lineage, `ArchiveSurvey` service so no agent holds a repository, stale-elite and breacher-preferring parent selection for the 21 never-breached elites Phase 5 measured, black-box/white-box modes with `grey_box` failing validation on D2, and clean budget exhaustion. 492 tests green. |
 | 6 | not started | | |
 | 7 | not started | | |
 | 8 | not started | | |

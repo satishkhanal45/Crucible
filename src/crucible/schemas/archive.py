@@ -32,6 +32,8 @@ class ArchivedAttack(BaseModel):
     id: uuid.UUID
     round_generated: int
     parent_id: uuid.UUID | None
+    recombined_with: uuid.UUID | None = None
+    mutation_operator: str | None = None
     payload: str
     vector: DeliveryVector
     objective: Objective | None
@@ -65,6 +67,8 @@ class ArchivedAttack(BaseModel):
             objective=self.objective,
             technique=self.technique,
             parent_id=self.parent_id,
+            recombined_with=self.recombined_with,
+            mutation_operator=self.mutation_operator,
             round_generated=self.round_generated,
             benign_user_input=self.benign_user_input or "Summarize the laptop refresh policy",
             carrier_title=self.carrier_title,

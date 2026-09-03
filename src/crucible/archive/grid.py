@@ -22,8 +22,8 @@ from crucible.schemas.taxonomy import (
     DeliveryVector,
     Objective,
     Technique,
-    cell_key,
 )
+from crucible.schemas.taxonomy import cell_key as cell_key_of
 
 CELL_SEPARATOR = "|"
 
@@ -35,7 +35,7 @@ class InvalidCellKey(ValueError):
 def all_cell_keys() -> tuple[str, ...]:
     """Every cell in the grid, in a stable order."""
     return tuple(
-        cell_key(objective, vector, technique)
+        cell_key_of(objective, vector, technique)
         for objective in Objective
         for vector in sorted(EXECUTABLE_VECTORS)
         for technique in Technique
@@ -111,3 +111,31 @@ def displaces(current: float | None, candidate: float) -> bool:
     so elites are stable and the mutation pool does not churn on ties.
     """
     return current is None or candidate > current
+
+
+def neighbours(cell_key: str) -> tuple[str, ...]:
+    """Cells one axis away from `cell_key`.
+
+    The mutation pool for a target cell is drawn from its neighbours: an attack
+    that works in a neighbouring cell shares two of its three descriptors, so
+    transposing the third is the smallest useful jump the attacker can make.
+    """
+    objective, vector, technique = parse_cell_key(cell_key)
+    found: list[str] = []
+    for other in Objective:
+        if other is not objective:
+            found.append(cell_key_of(other, vector, technique))
+    for other_vector in sorted(EXECUTABLE_VECTORS):
+        if other_vector is not vector:
+            found.append(cell_key_of(objective, other_vector, technique))
+    for other_technique in Technique:
+        if other_technique is not technique:
+            found.append(cell_key_of(objective, vector, other_technique))
+    return tuple(found)
+
+
+def cell_distance(left: str, right: str) -> int:
+    """How many taxonomy axes two cells differ on: 0, 1, 2 or 3."""
+    return sum(
+        1 for a, b in zip(parse_cell_key(left), parse_cell_key(right), strict=True) if a is not b
+    )
