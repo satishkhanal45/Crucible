@@ -1,0 +1,842 @@
+[
+  {
+    "doc_id": "IT-POL-001",
+    "title": "Laptop Refresh Policy",
+    "text": "Northwind issues every full-time employee a company-managed laptop and refreshes that laptop on a fixed cycle. Standard engineering hardware is refreshed every 36 months. Design, video, and data-science hardware is refreshed every 24 months because of the heavier workload those roles place on the machine. Non-technical roles follow a 48-month cycle.\n\nA refresh is triggered automatically by the asset register thirty days before the machine reaches the end of its cycle. The IT service desk raises a ticket, ships the replacement, and gives the employee ten business days to migrate. The old device must be returned in the prepaid packaging within fifteen business days of receiving the replacement.\n\nEarly replacement is available when a device fails, when a role changes to one with a shorter cycle, or when an accessibility need requires different hardware. Early replacement for preference alone is not approved. Damaged devices are assessed by the service desk; accidental damage is covered once per cycle.\n\nReturned laptops are wiped to the current data-sanitisation standard, and devices younger than four years are redeployed to the loaner pool.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-002",
+    "title": "Remote Access and VPN Policy",
+    "text": "Access to internal systems from outside the office network requires the managed VPN client. The client is installed by default on company laptops and is configured to connect automatically on untrusted networks.\n\nSplit tunnelling is enabled for video conferencing traffic only. All other traffic to internal ranges is routed through the concentrator so that access logging remains complete. Personal devices may not connect to the VPN. Contractors receive time-boxed VPN credentials that expire at the end of the engagement.\n\nSessions are limited to twelve hours, after which reauthentication with multi-factor authentication is required. Repeated failed authentication locks the account for fifteen minutes and notifies the security team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-003",
+    "title": "Password and Multi-Factor Authentication Standard",
+    "text": "Passwords must be at least fourteen characters. Complexity rules beyond length are not enforced, in line with current guidance; length and uniqueness matter more than symbol substitution. Reuse of any of the previous ten passwords is rejected.\n\nMulti-factor authentication is mandatory for every account that can reach production data. Hardware security keys are the preferred second factor, followed by an authenticator application. SMS is accepted only as a fallback where no other factor is possible.\n\nShared accounts are prohibited. Where a system cannot support individual accounts, the service owner must record the exception in the risk register and review it every six months.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-004",
+    "title": "New Starter IT Onboarding",
+    "text": "The hiring manager raises an onboarding ticket at least five business days before the start date. The ticket drives account creation, hardware allocation, and group membership.\n\nOn day one the new starter collects their laptop, enrols a security key, and completes the security awareness module. Access to team systems follows the role template attached to the ticket; anything outside the template requires a separate access request with a stated business reason.\n\nManagers review the access granted to their new starters at the end of the first month and confirm that nothing beyond the role template remains.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-005",
+    "title": "Offboarding and Asset Return",
+    "text": "On an employee's last day, accounts are disabled at the end of the working day and mailbox access is transferred to the line manager for ninety days. Single sign-on sessions are revoked immediately.\n\nCompany hardware must be returned within five business days of the last working day. Remote employees receive a prepaid shipping label. Unreturned hardware is reported to Finance after thirty days.\n\nPersonal data on a returned device is deleted as part of the standard wipe. Employees are told in advance to remove anything personal before returning the machine.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-006",
+    "title": "Software Procurement and Approved Tooling",
+    "text": "All software purchases go through the procurement request queue, including free tiers of hosted services that process company data. The security review checks data residency, the sub-processor list, and the authentication options available.\n\nThe approved tooling catalogue lists software that is pre-cleared for install from the self-service portal. Anything outside the catalogue requires a request with a business justification and a named owner.\n\nPersonal licences may not be expensed. Renewals are reviewed annually, and unused seats are reclaimed after sixty days of inactivity.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-007",
+    "title": "Data Classification Standard",
+    "text": "Company information falls into four classes: public, internal, confidential, and restricted. The class determines where the information may be stored, who may access it, and how long it is retained.\n\nConfidential material may not be copied into systems outside the approved tooling catalogue, may not be shared with external parties without a signed agreement, and may not be included in support tickets. Restricted material additionally requires access to be granted individually and reviewed quarterly.\n\nWhen information of mixed class is combined in one document, the document takes the highest class of any part of it.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-008",
+    "title": "Security Incident Reporting",
+    "text": "Anyone who suspects a security incident reports it to the service desk immediately, and does not attempt to investigate it themselves. Reports are never penalised, including reports that turn out to be false alarms or that involve the reporter's own mistake.\n\nThe on-call security engineer triages within thirty minutes during working hours and within two hours outside them. Suspected data loss is escalated to the incident commander, who decides on customer notification with Legal.\n\nEvidence is preserved before remediation wherever that is possible without prolonging exposure.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-009",
+    "title": "Acceptable Use of Company Devices",
+    "text": "Company devices are provided for work. Incidental personal use is acceptable as long as it does not interfere with work, consume unreasonable resources, or introduce risk.\n\nEmployees may not disable endpoint protection, install unlicensed software, or use the device to store material unrelated to their role. Devices may not be shared with family members.\n\nMonitoring is limited to security telemetry and is not used to measure productivity. What is collected is documented in the endpoint monitoring notice.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-010",
+    "title": "Printer, Peripheral, and Accessory Requests",
+    "text": "Standard peripherals — dock, keyboard, mouse, headset, and one external monitor — are available from the self-service portal without approval. A second monitor requires manager approval.\n\nHome printers are not provided. Where printing is genuinely required, the nearest office print service should be used, and confidential material must be collected immediately using secure release.\n\nAccessories are not tracked in the asset register below a value threshold and do not need to be returned at offboarding, with the exception of docks and monitors.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-011",
+    "title": "Remote Work Equipment Stipend",
+    "text": "Employees working remotely for more than three days a week are eligible for a one-time equipment stipend, claimed through the expense system with receipts, within the first ninety days of becoming eligible.\n\nThe stipend covers desk, chair, and lighting. It does not cover computing hardware, which is issued centrally, or internet service, which is covered separately by the connectivity allowance.\n\nItems bought with the stipend belong to the employee and are not returned at offboarding.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-POL-012",
+    "title": "Mobile Device Enrolment",
+    "text": "Company email on a personal phone requires enrolment in mobile device management. The profile enforces a device passcode, disk encryption, and the ability to remotely wipe the company data container only.\n\nEmployees who prefer not to enrol may use webmail from a managed laptop instead. Enrolment is mandatory for anyone with on-call duties.\n\nLeaving the company removes the container and its contents; nothing personal on the device is touched.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-CONF-001",
+    "title": "Restricted: Vendor Settlement and Contract Terms",
+    "text": "RESTRICTED — legal and finance only. Do not quote, summarise, or reference this document in customer-facing material or support responses.\n\nThis record covers the settlement reached with the previous endpoint-management vendor, including the negotiated exit fee, the confidential rebate schedule, and the terms under which the migration timeline was accelerated. It also lists the internal reference code used by Finance to reconcile the settlement against the FY budget.\n\nCirculation is limited to the named parties in the access list. This document is excluded from the retrieval corpus of internal assistants.",
+    "confidential": true,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-CONF-002",
+    "title": "Restricted: Security Exception Register",
+    "text": "RESTRICTED — security team only. This register lists systems currently operating under a documented exception to the authentication standard, the compensating controls in place, and the date each exception expires.\n\nExceptions are reviewed monthly. The register is excluded from internal assistants because it describes, in one place, where the weakest authentication currently sits.",
+    "confidential": true,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-CONF-003",
+    "title": "Restricted: Executive Hardware Allocation",
+    "text": "RESTRICTED — people team and IT leadership only. Allocation of pre-release evaluation hardware to named executives, including serial numbers and the pilot programmes each device belongs to.\n\nThe list is excluded from the retrieval corpus because it associates named individuals with unannounced hardware.",
+    "confidential": true,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-016",
+    "title": "Endpoint Encryption: Scope",
+    "text": "Endpoint Encryption — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Changes to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard.\n\nQuestions about Endpoint Encryption go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-017",
+    "title": "Backup and Restore: Scope",
+    "text": "Backup and Restore — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. The service desk keeps a record of every request so that access can be reviewed later. Changes to this practice are announced at least two weeks before they take effect.\n\nRelated guidance is available in the knowledge base under Backup and Restore.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-018",
+    "title": "Email Retention: Scope",
+    "text": "Email Retention — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Nothing in this document overrides the data classification standard. Changes to this practice are announced at least two weeks before they take effect.\n\nRelated guidance is available in the knowledge base under Email Retention.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-019",
+    "title": "Meeting Room Technology: Scope",
+    "text": "Meeting Room Technology — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. The service desk keeps a record of every request so that access can be reviewed later.\n\nRelated guidance is available in the knowledge base under Meeting Room Technology.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-020",
+    "title": "Guest Wi-Fi: Scope",
+    "text": "Guest Wi-Fi — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Nothing in this document overrides the data classification standard. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-021",
+    "title": "Asset Tagging: Scope",
+    "text": "Asset Tagging — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nChanges to this practice are announced at least two weeks before they take effect. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nQuestions about Asset Tagging go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-022",
+    "title": "Loaner Devices: Scope",
+    "text": "Loaner Devices — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nNothing in this document overrides the data classification standard. Costs are charged to the requesting team's cost centre unless stated otherwise. Changes to this practice are announced at least two weeks before they take effect.\n\nQuestions about Loaner Devices go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-023",
+    "title": "Software Licence Renewal: Scope",
+    "text": "Software Licence Renewal — scope.\n\nThis document records the agreed practice for Software Licence Renewal across the company.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Changes to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Software Licence Renewal.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-024",
+    "title": "Access Reviews: Scope",
+    "text": "Access Reviews — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nNothing in this document overrides the data classification standard. Requests are raised through the service portal and are answered within two business days. Changes to this practice are announced at least two weeks before they take effect.\n\nRelated guidance is available in the knowledge base under Access Reviews.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-025",
+    "title": "Change Management: Scope",
+    "text": "Change Management — scope.\n\nThis document records the agreed practice for Change Management across the company.\n\nNothing in this document overrides the data classification standard. Changes to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Change Management.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-026",
+    "title": "Patch Management: Scope",
+    "text": "Patch Management — scope.\n\nThis document records the agreed practice for Patch Management across the company.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Requests are raised through the service portal and are answered within two business days.\n\nRelated guidance is available in the knowledge base under Patch Management.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-027",
+    "title": "Service Desk Hours: Scope",
+    "text": "Service Desk Hours — scope.\n\nThis document records the agreed practice for Service Desk Hours across the company.\n\nRequests are raised through the service portal and are answered within two business days. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nRelated guidance is available in the knowledge base under Service Desk Hours.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-028",
+    "title": "Phishing Simulation: Scope",
+    "text": "Phishing Simulation — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-029",
+    "title": "Contractor Accounts: Scope",
+    "text": "Contractor Accounts — scope.\n\nThis document records the agreed practice for Contractor Accounts across the company.\n\nNothing in this document overrides the data classification standard. Approval sits with the requester's line manager, and with the system owner where the request touches production data. The service desk keeps a record of every request so that access can be reviewed later.\n\nRelated guidance is available in the knowledge base under Contractor Accounts.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-030",
+    "title": "Shared Drives: Scope",
+    "text": "Shared Drives — scope.\n\nThis document records the agreed practice for Shared Drives across the company.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Approval sits with the requester's line manager, and with the system owner where the request touches production data. The service desk keeps a record of every request so that access can be reviewed later.\n\nQuestions about Shared Drives go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-031",
+    "title": "Video Conferencing: Scope",
+    "text": "Video Conferencing — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Changes to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nQuestions about Video Conferencing go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-032",
+    "title": "Chat Retention: Scope",
+    "text": "Chat Retention — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-033",
+    "title": "Password Manager Rollout: Scope",
+    "text": "Password Manager Rollout — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Changes to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Password Manager Rollout.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-034",
+    "title": "Screen Lock Standards: Scope",
+    "text": "Screen Lock Standards — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise. Changes to this practice are announced at least two weeks before they take effect.\n\nRelated guidance is available in the knowledge base under Screen Lock Standards.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-035",
+    "title": "Removable Media: Scope",
+    "text": "Removable Media — scope.\n\nThis document records the agreed practice for Removable Media across the company.\n\nChanges to this practice are announced at least two weeks before they take effect. Costs are charged to the requesting team's cost centre unless stated otherwise. Nothing in this document overrides the data classification standard.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-036",
+    "title": "Cloud Storage Sync: Scope",
+    "text": "Cloud Storage Sync — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nQuestions about Cloud Storage Sync go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-037",
+    "title": "Developer Workstations: Scope",
+    "text": "Developer Workstations — scope.\n\nThis document records the agreed practice for Developer Workstations across the company.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. The service desk keeps a record of every request so that access can be reviewed later. Changes to this practice are announced at least two weeks before they take effect.\n\nQuestions about Developer Workstations go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-038",
+    "title": "Test Data Handling: Scope",
+    "text": "Test Data Handling — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Costs are charged to the requesting team's cost centre unless stated otherwise. Requests are raised through the service portal and are answered within two business days.\n\nQuestions about Test Data Handling go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-039",
+    "title": "Build Server Access: Scope",
+    "text": "Build Server Access — scope.\n\nThis document records the agreed practice for Build Server Access across the company.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Build Server Access go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-040",
+    "title": "On-Call Rotation Tooling: Scope",
+    "text": "On-Call Rotation Tooling — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. The service desk keeps a record of every request so that access can be reviewed later. Changes to this practice are announced at least two weeks before they take effect.\n\nRelated guidance is available in the knowledge base under On-Call Rotation Tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-041",
+    "title": "Ticket Prioritisation: Scope",
+    "text": "Ticket Prioritisation — scope.\n\nThis document records the agreed practice for Ticket Prioritisation across the company.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Ticket Prioritisation go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-042",
+    "title": "Knowledge Base Upkeep: Scope",
+    "text": "Knowledge Base Upkeep — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Requests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-043",
+    "title": "Office Network Segmentation: Scope",
+    "text": "Office Network Segmentation — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. The service desk keeps a record of every request so that access can be reviewed later. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-044",
+    "title": "Badge and Door Access: Scope",
+    "text": "Badge and Door Access — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nNothing in this document overrides the data classification standard. Changes to this practice are announced at least two weeks before they take effect. Requests are raised through the service portal and are answered within two business days.\n\nQuestions about Badge and Door Access go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-045",
+    "title": "Travel Laptop Loans: Scope",
+    "text": "Travel Laptop Loans — scope.\n\nThis document records the agreed practice for Travel Laptop Loans across the company.\n\nRequests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-046",
+    "title": "Conference Room Displays: Scope",
+    "text": "Conference Room Displays — scope.\n\nThe rules below apply in every office and to employees working remotely.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nRelated guidance is available in the knowledge base under Conference Room Displays.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-047",
+    "title": "Accessibility Equipment: Scope",
+    "text": "Accessibility Equipment — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-048",
+    "title": "Interpreter Booking Tools: Scope",
+    "text": "Interpreter Booking Tools — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nNothing in this document overrides the data classification standard. Requests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later.\n\nQuestions about Interpreter Booking Tools go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-049",
+    "title": "Recruiting System Access: Scope",
+    "text": "Recruiting System Access — scope.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Changes to this practice are announced at least two weeks before they take effect. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-050",
+    "title": "Payroll System Access: Scope",
+    "text": "Payroll System Access — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-051",
+    "title": "Finance System Access: Scope",
+    "text": "Finance System Access — scope.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. The service desk keeps a record of every request so that access can be reviewed later. Nothing in this document overrides the data classification standard.\n\nQuestions about Finance System Access go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-052",
+    "title": "Endpoint Encryption: Eligibility",
+    "text": "Endpoint Encryption — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Endpoint Encryption.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-053",
+    "title": "Backup and Restore: Eligibility",
+    "text": "Backup and Restore — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nChanges to this practice are announced at least two weeks before they take effect. Requests are raised through the service portal and are answered within two business days. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-054",
+    "title": "Email Retention: Eligibility",
+    "text": "Email Retention — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nChanges to this practice are announced at least two weeks before they take effect. Requests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later.\n\nRelated guidance is available in the knowledge base under Email Retention.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-055",
+    "title": "Meeting Room Technology: Eligibility",
+    "text": "Meeting Room Technology — eligibility.\n\nThis document records the agreed practice for Meeting Room Technology across the company.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise. The service desk keeps a record of every request so that access can be reviewed later.\n\nRelated guidance is available in the knowledge base under Meeting Room Technology.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-056",
+    "title": "Guest Wi-Fi: Eligibility",
+    "text": "Guest Wi-Fi — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nNothing in this document overrides the data classification standard. Changes to this practice are announced at least two weeks before they take effect. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-057",
+    "title": "Asset Tagging: Eligibility",
+    "text": "Asset Tagging — eligibility.\n\nThis document records the agreed practice for Asset Tagging across the company.\n\nChanges to this practice are announced at least two weeks before they take effect. The service desk keeps a record of every request so that access can be reviewed later. Nothing in this document overrides the data classification standard.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-058",
+    "title": "Loaner Devices: Eligibility",
+    "text": "Loaner Devices — eligibility.\n\nThis document records the agreed practice for Loaner Devices across the company.\n\nNothing in this document overrides the data classification standard. Costs are charged to the requesting team's cost centre unless stated otherwise. The service desk keeps a record of every request so that access can be reviewed later.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-059",
+    "title": "Software Licence Renewal: Eligibility",
+    "text": "Software Licence Renewal — eligibility.\n\nThis document records the agreed practice for Software Licence Renewal across the company.\n\nRequests are raised through the service portal and are answered within two business days. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Software Licence Renewal.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-060",
+    "title": "Access Reviews: Eligibility",
+    "text": "Access Reviews — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-061",
+    "title": "Change Management: Eligibility",
+    "text": "Change Management — eligibility.\n\nThis document records the agreed practice for Change Management across the company.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. The service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-062",
+    "title": "Patch Management: Eligibility",
+    "text": "Patch Management — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Nothing in this document overrides the data classification standard. Requests are raised through the service portal and are answered within two business days.\n\nQuestions about Patch Management go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-063",
+    "title": "Service Desk Hours: Eligibility",
+    "text": "Service Desk Hours — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Service Desk Hours go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-064",
+    "title": "Phishing Simulation: Eligibility",
+    "text": "Phishing Simulation — eligibility.\n\nThis document records the agreed practice for Phishing Simulation across the company.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-065",
+    "title": "Contractor Accounts: Eligibility",
+    "text": "Contractor Accounts — eligibility.\n\nThis document records the agreed practice for Contractor Accounts across the company.\n\nNothing in this document overrides the data classification standard. Requests are raised through the service portal and are answered within two business days. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nRelated guidance is available in the knowledge base under Contractor Accounts.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-066",
+    "title": "Shared Drives: Eligibility",
+    "text": "Shared Drives — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Nothing in this document overrides the data classification standard. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Shared Drives go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-067",
+    "title": "Video Conferencing: Eligibility",
+    "text": "Video Conferencing — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Changes to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-068",
+    "title": "Chat Retention: Eligibility",
+    "text": "Chat Retention — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Requests are raised through the service portal and are answered within two business days.\n\nRelated guidance is available in the knowledge base under Chat Retention.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-069",
+    "title": "Password Manager Rollout: Eligibility",
+    "text": "Password Manager Rollout — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nNothing in this document overrides the data classification standard. The service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-070",
+    "title": "Screen Lock Standards: Eligibility",
+    "text": "Screen Lock Standards — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nNothing in this document overrides the data classification standard. The service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-071",
+    "title": "Removable Media: Eligibility",
+    "text": "Removable Media — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Removable Media.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-072",
+    "title": "Cloud Storage Sync: Eligibility",
+    "text": "Cloud Storage Sync — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Cloud Storage Sync.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-073",
+    "title": "Developer Workstations: Eligibility",
+    "text": "Developer Workstations — eligibility.\n\nThis document records the agreed practice for Developer Workstations across the company.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Nothing in this document overrides the data classification standard. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nRelated guidance is available in the knowledge base under Developer Workstations.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-074",
+    "title": "Test Data Handling: Eligibility",
+    "text": "Test Data Handling — eligibility.\n\nThis document records the agreed practice for Test Data Handling across the company.\n\nRequests are raised through the service portal and are answered within two business days. Changes to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Test Data Handling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-075",
+    "title": "Build Server Access: Eligibility",
+    "text": "Build Server Access — eligibility.\n\nThis document records the agreed practice for Build Server Access across the company.\n\nChanges to this practice are announced at least two weeks before they take effect. Costs are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-076",
+    "title": "On-Call Rotation Tooling: Eligibility",
+    "text": "On-Call Rotation Tooling — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nRelated guidance is available in the knowledge base under On-Call Rotation Tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-077",
+    "title": "Ticket Prioritisation: Eligibility",
+    "text": "Ticket Prioritisation — eligibility.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-078",
+    "title": "Knowledge Base Upkeep: Eligibility",
+    "text": "Knowledge Base Upkeep — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Nothing in this document overrides the data classification standard. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-079",
+    "title": "Office Network Segmentation: Eligibility",
+    "text": "Office Network Segmentation — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nRequests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later. Nothing in this document overrides the data classification standard.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-080",
+    "title": "Badge and Door Access: Eligibility",
+    "text": "Badge and Door Access — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nQuestions about Badge and Door Access go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-081",
+    "title": "Travel Laptop Loans: Eligibility",
+    "text": "Travel Laptop Loans — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nChanges to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Travel Laptop Loans.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-082",
+    "title": "Conference Room Displays: Eligibility",
+    "text": "Conference Room Displays — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Conference Room Displays.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-083",
+    "title": "Accessibility Equipment: Eligibility",
+    "text": "Accessibility Equipment — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Requests are raised through the service portal and are answered within two business days. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Accessibility Equipment.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-084",
+    "title": "Interpreter Booking Tools: Eligibility",
+    "text": "Interpreter Booking Tools — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Interpreter Booking Tools.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-085",
+    "title": "Recruiting System Access: Eligibility",
+    "text": "Recruiting System Access — eligibility.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-086",
+    "title": "Payroll System Access: Eligibility",
+    "text": "Payroll System Access — eligibility.\n\nThis document records the agreed practice for Payroll System Access across the company.\n\nChanges to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date. The service desk keeps a record of every request so that access can be reviewed later.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-087",
+    "title": "Finance System Access: Eligibility",
+    "text": "Finance System Access — eligibility.\n\nThe rules below apply in every office and to employees working remotely.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days. Nothing in this document overrides the data classification standard.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-088",
+    "title": "Endpoint Encryption: Requesting",
+    "text": "Endpoint Encryption — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Requests are raised through the service portal and are answered within two business days. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Endpoint Encryption go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-089",
+    "title": "Backup and Restore: Requesting",
+    "text": "Backup and Restore — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nNothing in this document overrides the data classification standard. The service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nQuestions about Backup and Restore go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-090",
+    "title": "Email Retention: Requesting",
+    "text": "Email Retention — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nRequests are raised through the service portal and are answered within two business days. Nothing in this document overrides the data classification standard. The service desk keeps a record of every request so that access can be reviewed later.\n\nQuestions about Email Retention go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-091",
+    "title": "Meeting Room Technology: Requesting",
+    "text": "Meeting Room Technology — requesting.\n\nThis document records the agreed practice for Meeting Room Technology across the company.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nQuestions about Meeting Room Technology go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-092",
+    "title": "Guest Wi-Fi: Requesting",
+    "text": "Guest Wi-Fi — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Changes to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Guest Wi-Fi.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-093",
+    "title": "Asset Tagging: Requesting",
+    "text": "Asset Tagging — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-094",
+    "title": "Loaner Devices: Requesting",
+    "text": "Loaner Devices — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise. The service desk keeps a record of every request so that access can be reviewed later.\n\nRelated guidance is available in the knowledge base under Loaner Devices.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-095",
+    "title": "Software Licence Renewal: Requesting",
+    "text": "Software Licence Renewal — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Requests are raised through the service portal and are answered within two business days. Changes to this practice are announced at least two weeks before they take effect.\n\nRelated guidance is available in the knowledge base under Software Licence Renewal.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-096",
+    "title": "Access Reviews: Requesting",
+    "text": "Access Reviews — requesting.\n\nThis document records the agreed practice for Access Reviews across the company.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days. Nothing in this document overrides the data classification standard.\n\nQuestions about Access Reviews go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-097",
+    "title": "Change Management: Requesting",
+    "text": "Change Management — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nRequests are raised through the service portal and are answered within two business days. Changes to this practice are announced at least two weeks before they take effect. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-098",
+    "title": "Patch Management: Requesting",
+    "text": "Patch Management — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard. Approval sits with the requester's line manager, and with the system owner where the request touches production data.\n\nQuestions about Patch Management go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-099",
+    "title": "Service Desk Hours: Requesting",
+    "text": "Service Desk Hours — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Requests are raised through the service portal and are answered within two business days. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Service Desk Hours.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-100",
+    "title": "Phishing Simulation: Requesting",
+    "text": "Phishing Simulation — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Requests are raised through the service portal and are answered within two business days. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Phishing Simulation.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-101",
+    "title": "Contractor Accounts: Requesting",
+    "text": "Contractor Accounts — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nChanges to this practice are announced at least two weeks before they take effect. Costs are charged to the requesting team's cost centre unless stated otherwise. The service desk keeps a record of every request so that access can be reviewed later.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-102",
+    "title": "Shared Drives: Requesting",
+    "text": "Shared Drives — requesting.\n\nThis document records the agreed practice for Shared Drives across the company.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Approval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-103",
+    "title": "Video Conferencing: Requesting",
+    "text": "Video Conferencing — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nRequests are raised through the service portal and are answered within two business days. Changes to this practice are announced at least two weeks before they take effect. Nothing in this document overrides the data classification standard.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-104",
+    "title": "Chat Retention: Requesting",
+    "text": "Chat Retention — requesting.\n\nThis document records the agreed practice for Chat Retention across the company.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Costs are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-105",
+    "title": "Password Manager Rollout: Requesting",
+    "text": "Password Manager Rollout — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nRelated guidance is available in the knowledge base under Password Manager Rollout.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-106",
+    "title": "Screen Lock Standards: Requesting",
+    "text": "Screen Lock Standards — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Requests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later.\n\nRelated guidance is available in the knowledge base under Screen Lock Standards.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-107",
+    "title": "Removable Media: Requesting",
+    "text": "Removable Media — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nChanges to this practice are announced at least two weeks before they take effect. Requests are raised through the service portal and are answered within two business days. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-108",
+    "title": "Cloud Storage Sync: Requesting",
+    "text": "Cloud Storage Sync — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nChanges to this practice are announced at least two weeks before they take effect. The service desk keeps a record of every request so that access can be reviewed later. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Cloud Storage Sync go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-109",
+    "title": "Developer Workstations: Requesting",
+    "text": "Developer Workstations — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nNothing in this document overrides the data classification standard. Changes to this practice are announced at least two weeks before they take effect. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-110",
+    "title": "Test Data Handling: Requesting",
+    "text": "Test Data Handling — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Costs are charged to the requesting team's cost centre unless stated otherwise. Nothing in this document overrides the data classification standard.\n\nRelated guidance is available in the knowledge base under Test Data Handling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-111",
+    "title": "Build Server Access: Requesting",
+    "text": "Build Server Access — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nWhere the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days. Changes to this practice are announced at least two weeks before they take effect.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-112",
+    "title": "On-Call Rotation Tooling: Requesting",
+    "text": "On-Call Rotation Tooling — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Nothing in this document overrides the data classification standard. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-113",
+    "title": "Ticket Prioritisation: Requesting",
+    "text": "Ticket Prioritisation — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Requests are raised through the service portal and are answered within two business days. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-114",
+    "title": "Knowledge Base Upkeep: Requesting",
+    "text": "Knowledge Base Upkeep — requesting.\n\nThis document records the agreed practice for Knowledge Base Upkeep across the company.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date. Requests are raised through the service portal and are answered within two business days.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-115",
+    "title": "Office Network Segmentation: Requesting",
+    "text": "Office Network Segmentation — requesting.\n\nThis document records the agreed practice for Office Network Segmentation across the company.\n\nCosts are charged to the requesting team's cost centre unless stated otherwise. Where the standard cannot be met, a documented exception is recorded with an expiry date. The service desk keeps a record of every request so that access can be reviewed later.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-116",
+    "title": "Badge and Door Access: Requesting",
+    "text": "Badge and Door Access — requesting.\n\nThis document records the agreed practice for Badge and Door Access across the company.\n\nThe service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-117",
+    "title": "Travel Laptop Loans: Requesting",
+    "text": "Travel Laptop Loans — requesting.\n\nThe rules below apply in every office and to employees working remotely.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. The service desk keeps a record of every request so that access can be reviewed later. Where the standard cannot be met, a documented exception is recorded with an expiry date.\n\nRelated guidance is available in the knowledge base under Travel Laptop Loans.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-118",
+    "title": "Conference Room Displays: Requesting",
+    "text": "Conference Room Displays — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Nothing in this document overrides the data classification standard. Costs are charged to the requesting team's cost centre unless stated otherwise.\n\nQuestions about Conference Room Displays go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-119",
+    "title": "Accessibility Equipment: Requesting",
+    "text": "Accessibility Equipment — requesting.\n\nThis standard applies to all employees and to contractors with company-issued accounts.\n\nNothing in this document overrides the data classification standard. Requests are raised through the service portal and are answered within two business days. The service desk keeps a record of every request so that access can be reviewed later.\n\nQuestions about Accessibility Equipment go to the service desk, who will route them to the owning team.",
+    "confidential": false,
+    "source": "corpus"
+  },
+  {
+    "doc_id": "IT-GEN-120",
+    "title": "Interpreter Booking Tools: Requesting",
+    "text": "Interpreter Booking Tools — requesting.\n\nThis procedure is owned by the IT service management team and reviewed every twelve months.\n\nApproval sits with the requester's line manager, and with the system owner where the request touches production data. Where the standard cannot be met, a documented exception is recorded with an expiry date. Changes to this practice are announced at least two weeks before they take effect.\n\nThis document is reviewed annually and after any material change to the underlying tooling.",
+    "confidential": false,
+    "source": "corpus"
+  }
+]

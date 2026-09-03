@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate revision test test-unit test-integration lint format typecheck seed loop
+.PHONY: up down logs migrate revision test test-unit test-integration lint format typecheck seed corpus archive-stats loop
 
 COMPOSE := docker compose
 UV := uv run
@@ -44,7 +44,13 @@ typecheck:
 	$(UV) mypy
 
 seed:
-	@echo "seed: not implemented until phase 1 (corpus, canaries, seed attacks)"
+	$(UV) python -m crucible.cli.seed
+
+corpus:
+	$(UV) python -m crucible.target.reference.corpus_gen
+
+archive-stats:
+	$(UV) python -m crucible.cli.archive
 
 loop:
 	@echo "loop: not implemented until phase 6 (round orchestration)"

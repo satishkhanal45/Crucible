@@ -9,22 +9,37 @@ dependencies = [
     "alembic>=1.14",
     "asyncpg>=0.30",
     "fastapi>=0.115",
+    "httpx>=0.28",
+    "langgraph>=0.2.60",
     "pgvector>=0.3.6",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    "pyyaml>=6.0",
+    "sentence-transformers>=3.3",
+    # Direct dependency only so `tool.uv.sources` can pin it to the CPU wheels.
+    "torch>=2.5",
     "sqlalchemy[asyncio]>=2.0.36",
     "uvicorn[standard]>=0.34",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "mypy>=1.14",
+    "types-pyyaml>=6.0",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
     "ruff>=0.9",
     "testcontainers>=4.9",
 ]
+
+# torch ships CUDA wheels by default; this project is CPU-only on a 12GB box.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
 
 [build-system]
 requires = ["hatchling"]

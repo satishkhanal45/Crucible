@@ -10,8 +10,10 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+# The generated corpus is a committed, deterministic asset of the experiment.
 data/corpus/*
 !data/corpus/.gitkeep
+!data/corpus/corpus.json
 data/holdout/*
 !data/holdout/.gitkeep
 docs/findings.md

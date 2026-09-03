@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 
 from crucible.db.models import Spend
+from crucible.db.session import Database
 from crucible.schemas.spend import NewSpend, SpendRecord
 
 
@@ -46,3 +47,22 @@ class SpendRepository:
         statement = select(func.coalesce(func.sum(Spend.estimated_cost_usd), 0)).where(criterion)
         total = await self._session.scalar(statement)
         return Decimal(total if total is not None else 0)
+
+
+class DatabaseSpendRepository:
+    """`SpendRepositoryProtocol` backed by short-lived sessions.
+
+    A `CostMeter` lives for a whole round, which is longer than any one session
+    should be held open, so this variant opens and commits a session per call.
+    """
+
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    async def add(self, spend: NewSpend) -> SpendRecord:
+        async with self._database.session() as session:
+            return await SpendRepository(session).add(spend)
+
+    async def total_for_round(self, round_id: uuid.UUID | None) -> Decimal:
+        async with self._database.session() as session:
+            return await SpendRepository(session).total_for_round(round_id)

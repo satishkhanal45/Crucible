@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Iterator
+import random
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,10 @@ from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from crucible.archive.service import ArchiveService
 from crucible.config import Settings, load_settings
+from crucible.db.session import Database
+from crucible.services.embeddings import HashingEmbedder
 
 POSTGRES_IMAGE = "pgvector/pgvector:pg16"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -94,3 +98,21 @@ def migrated(alembic_config: Config) -> Iterator[Config]:
 def integration_settings(env: dict[str, str], database_url: str) -> Settings:
     del env
     return load_settings(_env_file=None, DATABASE_URL=database_url)
+
+
+@pytest.fixture
+async def archive(database_url: str, migrated: Config) -> AsyncIterator[ArchiveService]:
+    """An `ArchiveService` over an empty archive.
+
+    The archive tables are cleared first: novelty is measured against whatever
+    is already stored, so a leftover row from another test would change a score.
+    """
+    del migrated
+    database = Database(database_url)
+    try:
+        async with database.session() as session:
+            for table in ("novelty_rejections", "cells", "attempts", "attacks"):
+                await session.execute(text(f"DELETE FROM {table}"))
+        yield ArchiveService(database, HashingEmbedder(), rng=random.Random(20260903))
+    finally:
+        await database.close()

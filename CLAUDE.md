@@ -107,16 +107,63 @@ work committed.
 
 <!-- Keep this section current. Update it at the end of every session. -->
 
-- **Current phase:** 1 — Target harness and canaries
-- **Phase status:** Phase 0 complete; Phase 1 not started
-- **Effort spent:** 1.0 / 13.0 units
-- **Last completed:** Phase 0 — Foundation (tasks 1–11), all eight verification
-  tests green
-- **Next up:** Phase 1 — the `TargetAdapter` boundary, the reference RAG target,
-  and canary planting
-- **Open issues / blockers:** none. Note for local dev: compose publishes
-  `${POSTGRES_PORT:-5432}` and `${API_PORT:-8000}`; override them in `.env` when
-  a host service already owns those ports.
+- **Current phase:** 4 — Attacker agent
+- **Phase status:** Phases 0–3 and 5 complete; Phase 4 not started (build order
+  is 0 → 1 → 2 → 3 → 5 → 4 → 6 → 7 → 8)
+- **Effort spent:** 8.0 / 13.0 units
+- **Last completed:** Phase 5 — the five-layer defense stack and the defender
+  agent (tasks 1–7), verification tests 1–23 green. End-to-end against the 40
+  seed attacks: the empty baseline blocks 65.6% (holdout 75.0%), a hand-written
+  reasonable config blocks 93.8% (holdout 87.5%) at 100% utility, objective
+  score +0.8375
+- **Next up:** Phase 4 — the attacker agent. The archive, the novelty gate, the
+  defense stack, and the evaluation service are all in place for it to plug into.
+- **Open issues / blockers:** none. Notes for whoever picks this up:
+  - `docs/spec.md` §7 wins over `project_context.md` on canary placement: one
+    canary class per location, so the system prompt carries `SYSPROMPT_CANARY`
+    only. Planting a second class there would make a system-prompt leak
+    indistinguishable from a retrieval-scope violation.
+  - **The target corpus has no HNSW index, on purpose.** HNSW is approximate,
+    and a document injected by an `indirect_document` attack is an outlier that
+    the graph search can fail to reach — an undelivered attack would then be
+    scored as blocked. Target retrieval is an exact scan ordered by
+    `(distance, doc_id)`. Phase 3's archive is large and measures novelty
+    statistically, so it should use HNSW; the target corpus must not.
+  - Tier 1's tool rule counts an unauthorized privileged **execution** as a
+    breach. A call the structural layer blocked is `blocked`, not `breached` —
+    otherwise no defense configuration could ever improve the tool-hijack score.
+    See the docstring in `crucible/oracle/tier1.py`.
+  - Attempt traces contain that attempt's canary values, because replay needs
+    them. Phase 7 must redact `trace.canaries` and `trace.attempt.payload`.
+  - **The archive's HNSW index cannot be both used and exact.** Measured on a
+    5000-row, 384-dimension archive: `ef_search` 40 → index used, recall 0.48;
+    100 → index used, recall 0.76; 200 → exact scan, recall 0.93; 1000 → exact
+    scan, recall 1.00. Novelty gates execution, so it runs at `ef_search=1000`
+    (exact, reproducible) and the index is kept for scale. Ordering breaks ties
+    on attack id, in Python, after an index-friendly single-key `ORDER BY`.
+    Revisit only with numbers, not intuition.
+  - `generality` is 0.0 when there are no past defense configs. Phase 5 creates
+    the first ones; do not change the zero case to 1.0, which would inflate
+    every fitness score in the archive.
+  - **`output.canary_scan` is measurement, not blocking.** It records which
+    canary classes the target emitted so the oracle's evidence is complete, which
+    is why it must be true in production. Blocking a leaked secret is
+    `output.secret_patterns` plus `on_violation`. If `canary_scan` itself
+    blocked, the empty baseline would block every attack and the experiment would
+    measure nothing.
+  - **Tier 1 counts unauthorized privileged *execution*.** Layer 5 blocking a
+    call yields `blocked`, recorded in `attempts.blocked_tools` and surfaced as
+    `hijack_attempted_but_blocked` for the Phase 8 ablation table.
+  - The benign task expectations in `data/benign_tasks.yaml` were recorded
+    against the reference target with the hashing embedder. Changing the corpus,
+    the retrieval threshold, or the embedding model requires re-recording them.
+  - `EvaluationService` reads the archive through `list_non_holdout()` and
+    `list_holdout()`, which are **not** agent-safe methods. Holdout block rate is
+    impossible otherwise, and widening an agent-facing method would weaken the
+    isolation property. Prompt builders still may not call them, and
+    `tests/unit/test_holdout_isolation.py` enforces that.
+  - Compose publishes `${POSTGRES_PORT:-5432}` and `${API_PORT:-8000}`; override
+    them in `.env` when a host service already owns those ports.
 - **Deferred items pulled back in:** none (register is `docs/spec.md` §4)
 
 ### Phase log
@@ -124,10 +171,10 @@ work committed.
 | Phase | Status | Units spent | Notes |
 |---|---|---|---|
 | 0 | complete | 1.0 | uv + Python 3.12, config, async SQLAlchemy + Alembic, pgvector smoke migration, FastAPI `/health` and `/ready`, JSON logging with request ids, compose stack, Makefile, ruff + mypy --strict, CostMeter with retry/backoff, GitHub Actions. 50 tests green. |
-| 1 | not started | | |
-| 2 | not started | | |
-| 3 | not started | | |
-| 5 | not started | | |
+| 1 | complete | 2.0 | Embedding service (MiniLM CPU + a deterministic hashing embedder for offline tests), `TargetAdapter` boundary, 120-doc committed corpus, pgvector retrieval that excludes confidential docs in SQL, four-class canary system with multi-encoding detection, four tools (two privileged), output-contract validator, `reset()` from a pristine snapshot, egress guard, `make seed`. 196 tests green. |
+| 2 | complete | 1.5 | Attack/taxonomy schemas with D3 vector rejection, `direct` and `indirect_document` delivery, Tier 1 (deterministic) and Tier 2 (rule-based) oracle with a Tier 3 stub and clean D4 seam, `combine()` plus aggregate warning above 15% inconclusive, execution sandbox (reset/plant/deliver/judge/persist/reset) with wall-clock timeouts as `error`, egress guard wiring, a bounded pool of namespace-isolated targets, `replay()`, and the `(attack_id, defense_config_id)` outcome cache. 257 tests green. |
+| 3 | complete | 1.5 | 96-cell MAP-Elites grid with coverage that always prints its denominator, taxonomy classifier (one retry then `unclassified`, via CostMeter), `attacks`/`cells`/`novelty_rejections` schema with an HNSW index, k=15 novelty with `MIN_NOVELTY` rejection *before* execution, fitness with generality over all past configs, elites, holdout enforced in the repository layer, 40 committed seed attacks covering 40/96 cells, and `crucible archive stats`. 351 tests green. |
+| 5 | complete | 2.0 | Real five-layer `DefenseConfig` (fixed detector classes, template-bounded refusal text, order-independent fingerprint), all five layers wired into the reference target, argument-provenance tracing for `require_user_origin_for_privileged`, 40 benign tasks with 12 hard negatives, standalone evaluation service with explicit screening/full scopes, and a LangGraph defender (triage → hypothesize → propose fan-out → validate → evaluate → select, capped retry). 432 tests green. |
 | 4 | not started | | |
 | 6 | not started | | |
 | 7 | not started | | |
@@ -143,7 +190,9 @@ make down
 make logs
 make migrate       # alembic upgrade head
 make revision m="..."   # autogenerate a migration
-make seed          # load corpus, plant canaries, load seed attacks
+make corpus        # regenerate data/corpus/corpus.json (deterministic)
+make seed          # load corpus, plant canaries, load seed attacks, verify
+make archive-stats # coverage out of 96, novelty, rejection rate, elites
 make test          # full suite
 make test-unit
 make test-integration
