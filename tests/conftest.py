@@ -22,7 +22,15 @@ ENV_VALUES = {
     "TARGET_ALLOWLIST": "localhost,127.0.0.1",
     "ROUND_BUDGET_USD": "5.00",
     "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2",
+    "LLM_PROVIDER": "groq",
+    "TARGET_MODEL": "llama-3.1-8b-instant",
+    "ATTACKER_MODEL": "openai/gpt-oss-120b",
+    "DEFENDER_MODEL": "openai/gpt-oss-120b",
+    "CLASSIFIER_MODEL": "openai/gpt-oss-120b",
+    "JUDGE_PROVIDER": "gemini",
     "DEFAULT_JUDGE_MODEL": "gemini-2.0-flash",
+    "PROVIDER_MAX_CONCURRENCY": "1",
+    "PROVIDER_MIN_INTERVAL_SECONDS": "0",
 }
 
 

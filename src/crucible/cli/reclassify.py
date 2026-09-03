@@ -25,15 +25,19 @@ from crucible.config import Settings
 from crucible.db.session import Database
 from crucible.execution.egress import EgressGuard, guarded_client
 from crucible.repositories.spend import DatabaseSpendRepository
-from crucible.services.cost_meter import CostMeter
-
-DEFAULT_MODEL = "llama-3.1-8b-instant"
+from crucible.services.cost_meter import CostMeter, pricing_from
+from crucible.services.pacing import ProviderPacer
 
 
 async def reclassify(
-    settings: Settings, console: Console, *, dry_run: bool = True, model: str = DEFAULT_MODEL
+    settings: Settings, console: Console, *, dry_run: bool = True, model: str | None = None
 ) -> float:
-    """Classify every seed attack and report agreement with its declared cell."""
+    """Classify every seed attack and report agreement with its declared cell.
+
+    `model` defaults to `CLASSIFIER_MODEL` from settings. It is not defaulted at
+    the typer option, because a literal there makes editing `.env` a no-op.
+    """
+    model = model or settings.CLASSIFIER_MODEL
     seeds = load_seed_attacks()
     database = Database(settings.DATABASE_URL)
     guard = EgressGuard.from_settings(settings)
@@ -46,7 +50,14 @@ async def reclassify(
         table.add_column(column)
 
     try:
-        meter = CostMeter(DatabaseSpendRepository(database), settings.ROUND_BUDGET_USD)
+        meter = CostMeter(
+            DatabaseSpendRepository(database),
+            settings.ROUND_BUDGET_USD,
+            pricing=pricing_from(settings.model_pricing),
+            pacer=ProviderPacer.from_settings(
+                settings.PROVIDER_MIN_INTERVAL_SECONDS, settings.PROVIDER_MAX_CONCURRENCY
+            ),
+        )
         classifier = TaxonomyClassifier(
             GroqClassifierClient(settings.GROQ_API_KEY, client, model=model), meter
         )

@@ -17,15 +17,18 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from contextlib import AsyncExitStack
+from collections.abc import Callable, Iterator
+from contextlib import AsyncExitStack, contextmanager
 from decimal import Decimal
 from enum import StrEnum
+from functools import wraps
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy.exc import SQLAlchemyError
 
 from crucible.archive.classifier import ScriptedClassifierClient
 from crucible.attacker.llm import ScriptedAttackerLLM
@@ -33,7 +36,7 @@ from crucible.attacker.state import AttackerMode
 from crucible.cli import archive as archive_cli
 from crucible.cli import reclassify as reclassify_cli
 from crucible.cli import seed as seed_cli
-from crucible.config import Settings, get_settings
+from crucible.config import ConfigurationError, Settings, get_settings
 from crucible.db.session import Database
 from crucible.defender.llm import ScriptedDefenderLLM
 from crucible.defenses.config import DefenseConfig
@@ -54,6 +57,13 @@ from crucible.reporting.markdown import render_round_report, render_run_report
 from crucible.reporting.redaction import present_payload
 from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RunRepository
+from crucible.services.cost_meter import BudgetExceeded
+from crucible.services.retry import (
+    AuthenticationFailed,
+    ModelNotFound,
+    ProviderError,
+    RateLimited,
+)
 from crucible.target.reference.llm import ScriptedTargetLLM
 
 console = Console()
@@ -66,6 +76,99 @@ app.add_typer(loop_app, name="loop")
 app.add_typer(report_app, name="report")
 app.add_typer(eval_app, name="eval")
 app.add_typer(archive_app, name="archive")
+
+
+#: Set by `--debug`. Off, a failure prints one actionable line; on, the
+#: traceback is preserved so a real defect is still debuggable.
+_debug = False
+
+
+@app.callback()
+def cli(
+    debug: Annotated[
+        bool, typer.Option("--debug", help="Show full tracebacks instead of one-line errors.")
+    ] = False,
+) -> None:
+    """Crucible — a co-evolutionary red-team loop."""
+    global _debug
+    _debug = debug
+
+
+def _fail(message: str, hint: str = "") -> None:
+    console.print(f"[red]{message}[/red]" + (f"\n[dim]{hint}[/dim]" if hint else ""))
+    raise typer.Exit(code=1)
+
+
+@contextmanager
+def _handled() -> Iterator[None]:
+    """Turn the failures a run actually meets into one line and exit 1.
+
+    A refused database connection and an expired API key are operator errors,
+    not defects, and a sixty-line rich traceback buries the one fact that says
+    what to change. `--debug` puts the traceback back.
+    """
+    try:
+        yield
+    except typer.Exit:
+        raise
+    except ConfigurationError as error:
+        if _debug:
+            raise
+        _fail(str(error), "Set the missing variables in .env; see .env.example.")
+    except AuthenticationFailed as error:
+        if _debug:
+            raise
+        _fail(str(error))
+    except ModelNotFound as error:
+        if _debug:
+            raise
+        _fail(str(error), "See https://console.groq.com/docs/deprecations for retirements.")
+    except RateLimited as error:
+        if _debug:
+            raise
+        _fail(
+            f"rate limit not cleared after retrying: {error}",
+            "Raise PROVIDER_MIN_INTERVAL_SECONDS or lower PROVIDER_MAX_CONCURRENCY in .env, "
+            "then resume the run.",
+        )
+    except BudgetExceeded as error:
+        if _debug:
+            raise
+        _fail(str(error), "Raise ROUND_BUDGET_USD in .env, or accept the partial results.")
+    except ProviderError as error:
+        if _debug:
+            raise
+        _fail(f"provider call failed: {error}")
+    except (ConnectionError, OSError) as error:
+        if _debug:
+            raise
+        _fail(
+            f"cannot reach a service Crucible needs: {error}",
+            "Is the database up? `make up`, then check DATABASE_URL in .env.",
+        )
+    except SQLAlchemyError as error:
+        if _debug:
+            raise
+        _fail(
+            f"database error: {type(error).__name__}: {_first_line(error)}",
+            "Is the database up and migrated? `make up && make migrate`.",
+        )
+
+
+def _first_line(error: BaseException) -> str:
+    return str(error).strip().splitlines()[0] if str(error).strip() else repr(error)
+
+
+def handled[**P, R](command: Callable[P, R]) -> Callable[P, R | None]:
+    """Apply `_handled` to a typer command without hiding its signature."""
+
+    @wraps(command)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
+        with _handled():
+            return command(*args, **kwargs)
+        return None  # pragma: no cover - _handled always raises or returns
+
+    return wrapper
 
 
 class EvalSet(StrEnum):
@@ -100,17 +203,22 @@ def _scripted_factories() -> LoopFactories:
 
 
 @app.command()
+@handled
 def seed() -> None:
     """Load the corpus, plant canaries, load seed attacks, verify placement."""
     raise typer.Exit(code=seed_cli.main())
 
 
 @archive_app.command("reclassify")
+@handled
 def archive_reclassify(
     dry_run: Annotated[
         bool, typer.Option("--dry-run/--no-dry-run", help="Never writes to the archive.")
     ] = True,
-    model: Annotated[str, typer.Option("--model")] = reclassify_cli.DEFAULT_MODEL,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Defaults to CLASSIFIER_MODEL from the environment."),
+    ] = None,
 ) -> None:
     """Run the REAL classifier over the 40 committed seeds and report agreement.
 
@@ -122,12 +230,14 @@ def archive_reclassify(
 
 
 @archive_app.command("stats")
+@handled
 def archive_stats() -> None:
     """Coverage out of 96, novelty distribution, rejection rate, elites."""
     raise typer.Exit(code=archive_cli.main())
 
 
 @loop_app.command("start")
+@handled
 def loop_start(
     rounds: Annotated[int, typer.Option(help="How many rounds to run.")] = 8,
     mode: Annotated[str, typer.Option(help="black_box or white_box.")] = "black_box",
@@ -141,6 +251,8 @@ def loop_start(
         mode=AttackerMode(mode),
         budget_usd=Decimal(str(budget)),
         seed=seed_value,
+        provider_max_concurrency=settings.PROVIDER_MAX_CONCURRENCY,
+        provider_min_interval_seconds=settings.PROVIDER_MIN_INTERVAL_SECONDS,
     )
     report = asyncio.run(_start(settings, loop_settings))
     _print_run(report)
@@ -164,6 +276,7 @@ async def _start(settings: Settings, loop_settings: LoopSettings) -> RunReport:
 
 
 @loop_app.command("resume")
+@handled
 def loop_resume(
     run_id: Annotated[str, typer.Option("--run-id", help="The run to continue.")],
 ) -> None:
@@ -198,6 +311,7 @@ async def _resume(settings: Settings, run_id: uuid.UUID) -> RunReport:
 
 
 @loop_app.command("status")
+@handled
 def loop_status(
     run_id: Annotated[str | None, typer.Option("--run-id")] = None,
 ) -> None:
@@ -276,6 +390,7 @@ def _print_run(report: RunReport) -> None:
 
 
 @eval_app.command("defense")
+@handled
 def eval_defense(
     config_id: Annotated[str, typer.Argument(help="A DefenseConfig fingerprint.")],
     which: Annotated[EvalSet, typer.Option("--set")] = EvalSet.ARCHIVE,
@@ -329,6 +444,7 @@ async def _eval(settings: Settings, config_id: str, which: EvalSet) -> None:
 
 
 @report_app.command("round")
+@handled
 def report_round(
     number: Annotated[int, typer.Argument(help="Round number.")],
     run_id: Annotated[str, typer.Option("--run-id")],
@@ -363,6 +479,7 @@ async def _report_round(
 
 
 @report_app.command("run")
+@handled
 def report_run(
     run_id: Annotated[str, typer.Option("--run-id")],
     output: Annotated[ReportFormat, typer.Option("--format")] = ReportFormat.MD,

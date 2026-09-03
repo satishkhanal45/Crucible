@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from crucible.logging import get_logger
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
+from crucible.services.retry import provider_error_for
 from crucible.target.adapter import ToolSpec
 
 logger = get_logger(__name__)
@@ -32,7 +33,6 @@ logger = get_logger(__name__)
 TARGET_TEMPERATURE = 0.0
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
 
 
 class LLMMessage(BaseModel):
@@ -298,7 +298,7 @@ class GroqTargetLLM:
         api_key: str,
         client: httpx.AsyncClient,
         *,
-        model: str = DEFAULT_GROQ_MODEL,
+        model: str,
         base_url: str = GROQ_BASE_URL,
         timeout: float = 60.0,
     ) -> None:
@@ -352,7 +352,17 @@ class GroqTargetLLM:
             headers={"Authorization": f"Bearer {self._api_key}"},
             timeout=self._timeout,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            # Mapped to a typed error rather than httpx's HTTPStatusError, which
+            # no retry policy lists: an unmapped 429 ends the run instead of
+            # backing off.
+            raise provider_error_for(
+                response.status_code,
+                provider=self.provider,
+                model=self._model,
+                retry_after=response.headers.get("Retry-After"),
+                detail=_detail(response),
+            )
         return self._parse(response.json())
 
     def _parse(self, body: dict[str, Any]) -> LLMReply:
@@ -381,3 +391,23 @@ class GroqTargetLLM:
                 completion_tokens=int(usage.get("completion_tokens", 0)),
             ),
         )
+
+
+#: How much of an error body to quote back. Enough to name the cause, short
+#: enough that a CLI line stays one line.
+DETAIL_CHARS = 200
+
+
+def _detail(response: httpx.Response) -> str:
+    """The provider's own explanation, when it sends one."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:DETAIL_CHARS].strip()
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            return str(error.get("message", ""))[:DETAIL_CHARS]
+        if isinstance(error, str):
+            return error[:DETAIL_CHARS]
+    return str(body)[:DETAIL_CHARS]

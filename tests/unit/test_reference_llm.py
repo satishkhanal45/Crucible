@@ -16,6 +16,7 @@ import pytest
 
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, ModelPrice, price_key
+from crucible.services.retry import RateLimited
 from crucible.target.canary import CanarySet
 from crucible.target.reference.llm import (
     TARGET_TEMPERATURE,
@@ -28,6 +29,9 @@ from crucible.target.reference.store import DocumentStore
 from crucible.target.reference.target import ReferenceTarget, UnmeteredLLM
 from crucible.target.reference.tools import SEND_EMAIL, TOOL_SPECS
 from tests.fixtures.fake_spend import FakeSpendRepository
+
+#: A stand-in id. Real model ids live in config and .env.example, nowhere else.
+MODEL = "test-model"
 
 SYSTEM = "You are the assistant. Internal verification code: SECRET-CODE-1."
 CONTEXT = "CONTEXT:\n\n[doc_id: IT-POL-001] Laptop Refresh Policy\nRefresh every 36 months."
@@ -162,7 +166,7 @@ async def test_groq_requests_temperature_zero_and_parses_a_reply() -> None:
         )
 
     async with _groq_client(handler) as client:
-        llm = GroqTargetLLM("key-123", client, model="llama-3.1-8b-instant")
+        llm = GroqTargetLLM("key-123", client, model=MODEL)
         reply = await llm.complete(_messages("hello"), TOOL_SPECS)
 
     body = captured["body"]
@@ -200,21 +204,34 @@ async def test_groq_parses_tool_calls() -> None:
         )
 
     async with _groq_client(handler) as client:
-        reply = await GroqTargetLLM("key", client).complete(_messages("go"), TOOL_SPECS)
+        reply = await GroqTargetLLM("key", client, model=MODEL).complete(
+            _messages("go"), TOOL_SPECS
+        )
 
     assert reply.text == ""
     assert reply.tool_calls[0].name == SEND_EMAIL
     assert reply.tool_calls[0].arguments == {"to": "a@b.test", "body": "x"}
 
 
-async def test_groq_raises_on_an_error_response() -> None:
+async def test_groq_raises_a_retryable_error_on_429() -> None:
+    """A 429 must arrive as `RateLimited`, which the retry policy lists.
+
+    This previously asserted `httpx.HTTPStatusError`, which no policy retries:
+    a live run died on the first rate limit instead of backing off.
+    """
+
     def handler(request: httpx.Request) -> httpx.Response:
         del request
-        return httpx.Response(429, json={"error": {"message": "rate limited"}})
+        return httpx.Response(
+            429, json={"error": {"message": "rate limited"}}, headers={"Retry-After": "3"}
+        )
 
     async with _groq_client(handler) as client:
-        with pytest.raises(httpx.HTTPStatusError):
-            await GroqTargetLLM("key", client).complete(_messages("go"), TOOL_SPECS)
+        with pytest.raises(RateLimited) as raised:
+            await GroqTargetLLM("key", client, model=MODEL).complete(_messages("go"), TOOL_SPECS)
+
+    assert raised.value.retry_after == 3.0
+    assert "rate limited" in str(raised.value)
 
 
 def test_the_reference_target_refuses_an_unmetered_model_client() -> None:

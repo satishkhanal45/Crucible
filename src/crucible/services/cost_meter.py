@@ -12,9 +12,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
+from crucible.config import DEFAULT_MODEL_PRICING, price_key
 from crucible.logging import get_logger
 from crucible.repositories.spend import SpendRepositoryProtocol
 from crucible.schemas.spend import NewSpend, SpendRecord, TokenUsage
+from crucible.services.pacing import ProviderPacer
 from crucible.services.retry import RetryPolicy, retry_async
 
 logger = get_logger(__name__)
@@ -55,20 +57,18 @@ class MeteredResult[T]:
     usage: TokenUsage
 
 
-def price_key(provider: str, model: str) -> str:
-    return f"{provider.strip().lower()}:{model.strip().lower()}"
+def pricing_from(rates: Mapping[str, tuple[Decimal, Decimal]]) -> dict[str, ModelPrice]:
+    """Adapt the configured rate table into the meter's own type."""
+    return {key: ModelPrice(prompt, completion) for key, (prompt, completion) in rates.items()}
 
 
-# Published list prices. Free tiers cost nothing in cash, but the meter still
-# needs a number to reason about budgets and to compare configurations.
-DEFAULT_PRICING: Mapping[str, ModelPrice] = {
-    "groq:llama-3.3-70b-versatile": ModelPrice(Decimal("0.59"), Decimal("0.79")),
-    "groq:llama-3.1-8b-instant": ModelPrice(Decimal("0.05"), Decimal("0.08")),
-    "groq:openai/gpt-oss-20b": ModelPrice(Decimal("0.10"), Decimal("0.50")),
-    "gemini:gemini-2.0-flash": ModelPrice(Decimal("0.10"), Decimal("0.40")),
-    "gemini:gemini-2.0-flash-lite": ModelPrice(Decimal("0.075"), Decimal("0.30")),
-    "gemini:gemini-1.5-flash": ModelPrice(Decimal("0.075"), Decimal("0.30")),
-}
+#: The dated table in `crucible.config`, which is where rates are edited.
+DEFAULT_PRICING: Mapping[str, ModelPrice] = pricing_from(
+    {
+        key: (Decimal(prompt), Decimal(completion))
+        for key, (prompt, completion) in DEFAULT_MODEL_PRICING.items()
+    }
+)
 
 
 class CostMeter:
@@ -81,6 +81,7 @@ class CostMeter:
         *,
         pricing: Mapping[str, ModelPrice] = DEFAULT_PRICING,
         retry_policy: RetryPolicy | None = None,
+        pacer: ProviderPacer | None = None,
     ) -> None:
         if budget_usd <= 0:
             raise ValueError("budget_usd must be greater than zero")
@@ -88,6 +89,10 @@ class CostMeter:
         self._budget = budget_usd
         self._pricing = pricing
         self._retry_policy = retry_policy or RetryPolicy()
+        #: Free-tier pacing. Every provider call in Crucible passes through
+        #: `call()`, so this is the one place that can hold the whole system to
+        #: a request rate.
+        self._pacer = pacer or ProviderPacer.unlimited()
 
     @property
     def budget_usd(self) -> Decimal:
@@ -166,6 +171,13 @@ class CostMeter:
         always reflects what was actually consumed.
         """
         await self.ensure_within_budget(round_id)
-        result = await retry_async(provider_call, retry_policy or self._retry_policy)
+
+        async def paced() -> MeteredResult[T]:
+            # Inside the retried callable, so a backoff and the pacer's own
+            # interval compose instead of racing.
+            async with self._pacer.slot():
+                return await provider_call()
+
+        result = await retry_async(paced, retry_policy or self._retry_policy)
         await self.record(round_id=round_id, provider=provider, model=model, usage=result.usage)
         return result.value

@@ -45,6 +45,7 @@ from crucible.repositories.rounds import RoundRepository, RunRepository
 from crucible.repositories.spend import DatabaseSpendRepository
 from crucible.services.cost_meter import BudgetExceeded, CostMeter, ModelPrice
 from crucible.services.embeddings import Embedder, embedder_from_settings
+from crucible.services.pacing import ProviderPacer
 from crucible.target.adapter import TargetAdapter
 from crucible.target.canary import CanarySet
 from crucible.target.reference.llm import MeteredTargetLLM, TargetLLM
@@ -64,6 +65,11 @@ class LoopSettings(BaseModel):
     budget_usd: Decimal = Decimal("5.00")
     seed: int = 20260906
     concurrency: int = Field(default=2, ge=1, le=8)
+    #: Free-tier pacing, applied to every provider call through `CostMeter`.
+    #: The target pool is capped by this too: a pool slot is a provider caller,
+    #: so a pool wider than the provider bound would only queue inside the meter.
+    provider_max_concurrency: int = Field(default=1, ge=1, le=16)
+    provider_min_interval_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
     candidates_per_round: int = Field(default=4, ge=3, le=5)
     cells_per_round: int = Field(default=4, ge=1, le=16)
 
@@ -92,10 +98,18 @@ async def build_components(
     pricing: Mapping[str, ModelPrice] | None = None,
 ) -> LoopComponents:
     """Wire every component one run needs."""
+    pacer = ProviderPacer.from_settings(
+        settings.provider_min_interval_seconds, settings.provider_max_concurrency
+    )
     cost_meter = (
-        CostMeter(DatabaseSpendRepository(database), settings.budget_usd, pricing=pricing)
+        CostMeter(
+            DatabaseSpendRepository(database),
+            settings.budget_usd,
+            pricing=pricing,
+            pacer=pacer,
+        )
         if pricing is not None
-        else CostMeter(DatabaseSpendRepository(database), settings.budget_usd)
+        else CostMeter(DatabaseSpendRepository(database), settings.budget_usd, pacer=pacer)
     )
 
     async def factory(namespace: str) -> TargetAdapter:
@@ -108,13 +122,16 @@ async def build_components(
         await target.seed(corpus)
         return target
 
-    pool = TargetPool(factory, size=settings.concurrency)
+    # Every attempt is a provider call, so the pool never runs wider than the
+    # provider bound; anything more would just queue inside the pacer.
+    workers = min(settings.concurrency, settings.provider_max_concurrency)
+    pool = TargetPool(factory, size=workers)
     executor = AttemptExecutor(
         pool,
         Oracle(),
         database,
         egress_guard=EgressGuard(allowlist),
-        settings=ExecutorSettings(concurrency=settings.concurrency),
+        settings=ExecutorSettings(concurrency=workers),
         cost_meter=cost_meter,
     )
     # Seeded from the run, so holdout assignment is reproducible: two runs with
