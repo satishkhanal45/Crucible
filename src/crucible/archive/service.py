@@ -178,6 +178,29 @@ class ArchiveService:
         is_holdout: bool,
         round_number: int,
     ) -> Admission:
+        async with self._database.session() as session:
+            existing = await AttackRepository(session).get(attack.attack_id)
+        if existing is not None:
+            # Attack ids are content-addressed, so an identical mutation of an
+            # identical parent lands here: that is a rediscovery, not a new
+            # attack, and it is recorded as one rather than raising.
+            novelty = NoveltyScore(value=0.0, archive_size=0)
+            rejection = NoveltyRejection(
+                novelty=0.0,
+                threshold=self._min_novelty,
+                nearest_neighbour_id=existing.id,
+                nearest_distance=0.0,
+                payload_hash=payload_fingerprint(attack.payload),
+                round_number=round_number,
+            )
+            async with self._database.session() as session:
+                await RejectionRepository(session).add(rejection)
+            logger.info(
+                "novelty.rediscovered",
+                extra={"attack_id": str(existing.id), "round": round_number},
+            )
+            return Admission(accepted=False, novelty=novelty, rejection=rejection)
+
         novelty = await self.novelty_of(embedding, exclude_id=attack.attack_id)
 
         if not novelty.is_novel(self._min_novelty):

@@ -282,3 +282,89 @@ class RejectionRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class RunRow(Base):
+    """One co-evolutionary run.
+
+    A halted run is a valid experiment: `status` distinguishes `halted` from
+    `failed`, and `halt_reason` says which signal in docs/spec.md section 14
+    tripped.
+    """
+
+    __tablename__ = "runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    attacker_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    rounds_planned: Mapped[int] = mapped_column(Integer, nullable=False)
+    rounds_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: D(0). The technical director's decision: always the empty config, so the
+    #: loop starts weak and can be shown to harden.
+    starting_config_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    current_config_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    budget_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    seed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    halt_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: The full configuration of the run, so a resume rebuilds the same loop.
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RoundRow(Base):
+    """One round of one run.
+
+    Rates are stored with their Wilson bounds *and* their counts, so a
+    `RoundReport` reconstructs exactly: a rate without an interval is not a
+    reportable number (docs/spec.md section 15).
+    """
+
+    __tablename__ = "rounds"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    round_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    attacker_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    defense_before: Mapped[str] = mapped_column(String(64), nullable=False)
+    defense_after: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    attacks_generated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attacks_rejected_novelty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    breaches_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    archive_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    archive_trials: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    archive_block_rate: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    archive_block_rate_ci_low: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    archive_block_rate_ci_high: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+
+    holdout_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    holdout_trials: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    holdout_block_rate: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    holdout_ci_low: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    holdout_ci_high: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+
+    #: archive - holdout. This is the overfitting measure.
+    overfit_gap: Mapped[Decimal] = mapped_column(Numeric(7, 5), nullable=False)
+
+    utility_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    utility_trials: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    utility_pass_rate: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+
+    mean_novelty: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False, default=0)
+    cells_occupied: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_cells: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Attacks the newly selected config reopened, with their ids.
+    regressions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    config_promoted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=0)
+    halt_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (UniqueConstraint("run_id", "round_number", name="uq_rounds_run_round"),)

@@ -118,6 +118,10 @@ class Defender:
         self._max_rounds = max_propose_rounds
         self._graph = self._build()
 
+    @property
+    def llm(self) -> DefenderLLM:
+        return self._llm
+
     # ------------------------------------------------------------ the nodes
 
     async def triage(self, state: DefenderState) -> DefenderState:

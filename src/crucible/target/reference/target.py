@@ -223,6 +223,11 @@ class ReferenceTarget:
         return self._store
 
     @property
+    def llm(self) -> TargetLLM:
+        """The metered model client, so the loop can scope its cost per round."""
+        return self._llm
+
+    @property
     def namespace(self) -> str:
         """The private corpus copy this target instance owns."""
         return self._store.namespace

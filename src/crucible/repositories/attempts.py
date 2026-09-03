@@ -90,6 +90,15 @@ class AttemptRepository:
         )
         return len(list(rows.scalars().all()))
 
+    async def outcomes_by_attack(self, defense_config_id: str) -> dict[uuid.UUID, Outcome]:
+        """Every attack's outcome under one config. The regression check reads this."""
+        rows = await self._session.execute(
+            select(Attempt.attack_id, Attempt.outcome).where(
+                Attempt.defense_config_id == defense_config_id
+            )
+        )
+        return {attack_id: Outcome(outcome) for attack_id, outcome in rows.all()}
+
     async def list_for_round(self, round_id: uuid.UUID) -> list[AttemptRecord]:
         rows = (
             (

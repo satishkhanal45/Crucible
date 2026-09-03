@@ -11,14 +11,18 @@ dependencies = [
     "fastapi>=0.115",
     "httpx>=0.28",
     "langgraph>=0.2.60",
+    "langgraph-checkpoint-postgres>=2.0",
     "pgvector>=0.3.6",
     "pydantic>=2.10",
+    "rich>=13.9",
     "pydantic-settings>=2.7",
+    "psycopg[binary,pool]>=3.2",
     "pyyaml>=6.0",
     "sentence-transformers>=3.3",
     # Direct dependency only so `tool.uv.sources` can pin it to the CPU wheels.
     "torch>=2.5",
     "sqlalchemy[asyncio]>=2.0.36",
+    "typer>=0.15",
     "uvicorn[standard]>=0.34",
 ]
 
@@ -40,6 +44,9 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
+
+[project.scripts]
+crucible = "crucible.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

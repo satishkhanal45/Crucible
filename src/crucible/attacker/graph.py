@@ -153,6 +153,10 @@ class Attacker:
     def settings(self) -> AttackerSettings:
         return self._settings
 
+    @property
+    def llm(self) -> AttackerLLM:
+        return self._llm
+
     # ------------------------------------------------------------ the nodes
 
     async def survey_cells(self, state: AttackerState) -> AttackerState:

@@ -48,6 +48,11 @@ class TargetPool:
     def built(self) -> int:
         return len(self._targets)
 
+    @property
+    def targets(self) -> tuple[TargetAdapter, ...]:
+        """The targets built so far. Used to scope per-round cost metering."""
+        return tuple(self._targets.values())
+
     async def _target_for(self, index: int) -> TargetAdapter:
         existing = self._targets.get(index)
         if existing is not None:

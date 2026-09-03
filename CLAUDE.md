@@ -107,16 +107,17 @@ work committed.
 
 <!-- Keep this section current. Update it at the end of every session. -->
 
-- **Current phase:** 6 — Loop orchestration
-- **Phase status:** Phases 0–5 complete; Phase 6 not started
-- **Effort spent:** 9.5 / 13.0 units
-- **Last completed:** Phase 4 — the attacker agent (tasks 1–6), verification
-  tests 1–17 green. One stubbed round against the 40-seed archive: 6 candidates
-  generated, 0 novelty-rejected, 2 critique-rejected, 4 accepted, coverage
-  unchanged at 40/96 and never decreasing
-- **Next up:** Phase 6 — round orchestration. Both agents, the archive gate, the
-  executor, and the evaluation service exist; the loop wires them into the
-  ten-step round algorithm in `docs/spec.md` §13 with collapse detection.
+- **Current phase:** 7 — Reporting
+- **Phase status:** Phases 0–6 complete; Phase 7 not started
+- **Effort spent:** 11.0 / 13.0 units
+- **Last completed:** Phase 6 — the co-evolution loop (tasks 1–9), verification
+  tests 1–18 green. A three-round stubbed run: archive block rate 0.867
+  [0.621, 0.963] → 0.895 [0.686, 0.971] → 0.905 [0.711, 0.973], holdout 1.000
+  (n=3) throughout, overfit gap −0.13 → −0.10, utility 1.000 (n=40) every round,
+  0 regressions, halted on `search_stalled`
+- **Next up:** Phase 7 — reporting. `RoundReport`/`RunReport` are stable and
+  every rate already carries its Wilson interval, so reporting reads the
+  `rounds` table and adds the coverage grid and charts.
 - **Open issues / blockers:** none. Notes for whoever picks this up:
   - `docs/spec.md` §7 wins over `project_context.md` on canary placement: one
     canary class per location, so the system prompt carries `SYSPROMPT_CANARY`
@@ -159,6 +160,21 @@ work committed.
   - The benign task expectations in `data/benign_tasks.yaml` were recorded
     against the reference target with the hashing embedder. Changing the corpus,
     the retrieval threshold, or the embedding model requires re-recording them.
+  - **D(0) is `DefenseConfig.empty()`, by decision of the technical director.**
+    The loop has to start weak and be shown to harden; starting from the
+    hand-written config leaves ~6 points of headroom and no story.
+  - **A regressing config is never promoted.** If the selected D(n) reopens an
+    archived attack that D(n-1) blocked, the round records the attack ids and
+    keeps D(n-1). Step 3 evaluates D(n-1) over the whole non-holdout archive to
+    establish the baseline that check compares against.
+  - **Attack ids are content-addressed** (`uuid5` over parent, operator, and
+    payload), which is what makes two runs with the same seed build the same
+    archive. Re-generating an identical mutation is recorded as a rediscovery,
+    not a duplicate row. Archives compare as sets: parallel branches commit in
+    whatever order they finish.
+  - LangGraph's checkpoint tables live in the same database and are **not**
+    ours; `alembic/env.py` filters them by name so autogenerate neither drops
+    them nor reports drift.
   - **The mutation pool falls back to the archive when no cell has an elite.**
     Cells only get elites once an attack in them has been executed and scored, so
     a freshly seeded archive would otherwise hand the attacker nothing on round
@@ -188,7 +204,7 @@ work committed.
 | 3 | complete | 1.5 | 96-cell MAP-Elites grid with coverage that always prints its denominator, taxonomy classifier (one retry then `unclassified`, via CostMeter), `attacks`/`cells`/`novelty_rejections` schema with an HNSW index, k=15 novelty with `MIN_NOVELTY` rejection *before* execution, fitness with generality over all past configs, elites, holdout enforced in the repository layer, 40 committed seed attacks covering 40/96 cells, and `crucible archive stats`. 351 tests green. |
 | 5 | complete | 2.0 | Real five-layer `DefenseConfig` (fixed detector classes, template-bounded refusal text, order-independent fingerprint), all five layers wired into the reference target, argument-provenance tracing for `require_user_origin_for_privileged`, 40 benign tasks with 12 hard negatives, standalone evaluation service with explicit screening/full scopes, and a LangGraph defender (triage → hypothesize → propose fan-out → validate → evaluate → select, capped retry). 432 tests green. |
 | 4 | complete | 1.5 | LangGraph attacker (survey → select_parents → strategize → generate fan-out → novelty_filter → self_critique → capped regenerate), six named mutation operators with full lineage, `ArchiveSurvey` service so no agent holds a repository, stale-elite and breacher-preferring parent selection for the 21 never-breached elites Phase 5 measured, black-box/white-box modes with `grey_box` failing validation on D2, and clean budget exhaustion. 492 tests green. |
-| 6 | not started | | |
+| 6 | complete | 1.5 | The ten-step round loop as a checkpointed LangGraph graph with an assertable event log, the never-cut regression check (named attack ids, config not promoted), the holdout generalization check, two-stage evaluation preserved through `EvaluationScope`, collapse detection with six named halt reasons, Wilson intervals on every reported rate with two-proportion tests, `runs`/`rounds` schema, `AsyncPostgresSaver` checkpointing with mid-round resume, and the typer + rich CLI. 550 tests green. |
 | 7 | not started | | |
 | 8 | not started | | |
 

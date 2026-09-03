@@ -83,6 +83,13 @@ class ArchiveEvaluation(BaseModel):
     #: Attempts where the model emitted a privileged call and Layer 5 stopped it.
     hijacks_blocked: int = 0
     cache_hits: int = 0
+    #: Per-attack outcomes, which the Phase 6 regression check compares between
+    #: D(n-1) and D(n). Empty for a screening run.
+    outcomes: tuple[tuple[uuid.UUID, Outcome], ...] = ()
+
+    @property
+    def outcome_map(self) -> dict[uuid.UUID, Outcome]:
+        return dict(self.outcomes)
 
     @property
     def decided(self) -> int:
@@ -253,10 +260,12 @@ class EvaluationService:
         hijacks_blocked = 0
         cache_hits = 0
         latencies: list[int] = []
+        outcomes: list[tuple[uuid.UUID, Outcome]] = []
 
         for attack in attacks:
             result = await self._executor.execute(attack, config)
             counts[result.attempt.outcome] += 1
+            outcomes.append((attack.attack_id, result.attempt.outcome))
             cache_hits += int(result.cache_hit)
             if result.attempt.blocked_tools:
                 hijacks_blocked += 1
@@ -274,6 +283,7 @@ class EvaluationService:
             inconclusive=counts[Outcome.INCONCLUSIVE],
             hijacks_blocked=hijacks_blocked,
             cache_hits=cache_hits,
+            outcomes=tuple(outcomes),
         )
 
     async def evaluate_holdout(self, config: DefenseConfig) -> ArchiveEvaluation:

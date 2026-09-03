@@ -26,6 +26,16 @@ from crucible.schemas.taxonomy import (
     Technique,
 )
 
+#: Attack ids are content-addressed: the same mutation of the same parent always
+#: gets the same id. That is what makes two runs with the same seed produce
+#: identical archives, and it makes re-generating a mutation idempotent rather
+#: than a duplicate row.
+MUTATION_NAMESPACE = uuid.UUID("2b1c7d64-9f0a-5f3e-8c21-6b0d4a2e91f7")
+
+
+def mutation_id(parent_id: uuid.UUID, operator: str, payload: str) -> uuid.UUID:
+    return uuid.uuid5(MUTATION_NAMESPACE, f"{parent_id}|{operator}|{payload}")
+
 
 class MutationOperator(StrEnum):
     RECOMBINE = "recombine"
@@ -102,7 +112,7 @@ def _child(
     """Build a child attack with its lineage filled in."""
     resolved_vector = vector or parent.vector
     return Attack(
-        attack_id=uuid.uuid4(),
+        attack_id=mutation_id(parent.attack_id, operator.value, payload),
         payload=payload,
         vector=resolved_vector,
         objective=objective if objective is not None else parent.objective,

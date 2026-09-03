@@ -94,6 +94,10 @@ class MeteredAttackerLLM:
         self._meter = cost_meter
         self._round_id = round_id
 
+    def set_round(self, round_id: uuid.UUID | None) -> None:
+        """Scope subsequent calls to a round, so its cost can be totalled."""
+        self._round_id = round_id
+
     @property
     def provider(self) -> str:
         return self._inner.provider

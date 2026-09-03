@@ -30,6 +30,20 @@ def render_item(type_: str, obj: Any, autogen_context: Any) -> str | bool:
     return False
 
 
+def include_name(name: str | None, type_: str, parent_names: Any) -> bool:
+    """Only manage tables this project's metadata declares.
+
+    LangGraph's `AsyncPostgresSaver` creates and migrates its own checkpoint
+    tables in the same database. They are not ours, so autogenerate must neither
+    propose dropping them nor count them as drift — the empty-diff test has to
+    stay meaningful.
+    """
+    del parent_names
+    if type_ == "table":
+        return name in target_metadata.tables
+    return True
+
+
 def configure(connection: Connection | None = None, url: str | None = None) -> None:
     context.configure(
         connection=connection,
@@ -40,6 +54,7 @@ def configure(connection: Connection | None = None, url: str | None = None) -> N
         render_item=render_item,
         render_as_batch=False,
         include_schemas=False,
+        include_name=include_name,
     )
 
 

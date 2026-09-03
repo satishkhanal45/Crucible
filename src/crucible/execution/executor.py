@@ -107,6 +107,19 @@ class AttemptExecutor:
         self._metrics = ExecutionMetrics()
 
     @property
+    def llm(self) -> object | None:
+        """The pooled targets' model client, for per-round cost scoping.
+
+        `None` until the pool has built its first target, which is fine: the
+        loop scopes again at the start of every round.
+        """
+        for target in self._pool.targets:
+            client: object | None = getattr(target, "llm", None)
+            if client is not None:
+                return client
+        return None
+
+    @property
     def metrics(self) -> ExecutionMetrics:
         return self._metrics
 
