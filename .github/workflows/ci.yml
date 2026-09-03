@@ -55,3 +55,13 @@ jobs:
 
       - name: Integration tests
         run: uv run pytest tests/integration
+
+      # Every number in docs/findings.md is regenerated from stored data. The
+      # unit suite asserts the committed blocks match; this asserts the CLI that
+      # writes them agrees, against a migrated database.
+      - name: Findings are regenerated, not hand-typed
+        run: |
+          uv run alembic upgrade head
+          uv run crucible findings regenerate --check
+        env:
+          DATABASE_URL: postgresql+asyncpg://crucible:crucible@localhost:5432/crucible

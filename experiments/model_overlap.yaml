@@ -1,0 +1,30 @@
+# The known-hard problem, and its mitigation.
+#
+# An attacker agent explores ONE model's priors. Attacks that work are partly a
+# property of the model that wrote them, so an archive built by a single model
+# family may be measuring that family rather than the defense. This experiment
+# bounds the problem instead of ignoring it: one attacker round from each of two
+# model families against the same defense config and the same parent selection,
+# then the overlap between what they produced, by cell and by embedding
+# distance.
+#
+# High overlap means the archive is largely model-independent. Low overlap means
+# it is not, and that is a stated limitation rather than a defect.
+name: model_overlap
+kind: model_overlap
+description: >-
+  One attacker round per model family against an identical starting state,
+  reporting cell overlap (Jaccard over occupied cells) and mean nearest-neighbour
+  embedding distance between the two sets of generated attacks.
+rounds_rationale: >-
+  One round per model. Two rounds total, roughly 20-30 minutes; the comparison
+  is between the two products, so more rounds would not sharpen it.
+seed: 20260906
+rounds: 1
+budget_usd: "2.00"
+concurrency: 1
+models:
+  - openai/gpt-oss-120b
+  - qwen/qwen3.6-27b
+source_run_id: null
+ablation: none

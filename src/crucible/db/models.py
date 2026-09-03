@@ -306,6 +306,13 @@ class RunRow(Base):
     budget_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
     seed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     halt_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: True when ANY agent in this run was a scripted stub. A stubbed run
+    #: produces results of exactly the same shape as a real one, so without this
+    #: flag a test double is indistinguishable from a measurement. Reports
+    #: banner it and `crucible findings regenerate` refuses to read it.
+    stubbed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Provider and model per agent role, as the clients themselves reported.
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     #: The full configuration of the run, so a resume rebuilds the same loop.
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     started_at: Mapped[datetime] = mapped_column(
@@ -394,6 +401,53 @@ class DefenseConfigRow(Base):
         String(64), ForeignKey("defense_configs.id", ondelete="SET NULL"), nullable=True
     )
     label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ClassifierAgreementRow(Base):
+    """One measured run of the real taxonomy classifier over the seed attacks.
+
+    Coverage is only as trustworthy as the labels the cells were built from, so
+    every figure that quotes coverage has to be able to quote this alongside it.
+    Storing it is what stops the number being typed by hand into findings: the
+    Phase 8 regeneration script reads the latest row.
+    """
+
+    __tablename__ = "classifier_agreement"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    #: Seeds compared. The denominator of all three rates.
+    total: Mapped[int] = mapped_column(Integer, nullable=False)
+    objective_agreed: Mapped[int] = mapped_column(Integer, nullable=False)
+    technique_agreed: Mapped[int] = mapped_column(Integer, nullable=False)
+    combined_agreed: Mapped[int] = mapped_column(Integer, nullable=False)
+    unclassified: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ExperimentResultRow(Base):
+    """What one Phase 8 experiment produced, stored so findings can regenerate.
+
+    The payload is the experiment's own result schema, dumped as JSON. Nothing
+    in `docs/findings.md` is typed by hand: the regeneration script reads these
+    rows, the `rounds` table, the `attempts` table and the stored classifier
+    agreement, and rewrites every generated block.
+    """
+
+    __tablename__ = "experiment_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    experiment: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

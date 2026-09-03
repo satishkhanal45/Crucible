@@ -30,16 +30,31 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy.exc import SQLAlchemyError
 
-from crucible.archive.classifier import ScriptedClassifierClient
-from crucible.attacker.llm import ScriptedAttackerLLM
 from crucible.attacker.state import AttackerMode
 from crucible.cli import archive as archive_cli
 from crucible.cli import reclassify as reclassify_cli
 from crucible.cli import seed as seed_cli
+from crucible.cli.providers import Provider, attacker_on, build_factories
 from crucible.config import ConfigurationError, Settings, get_settings
 from crucible.db.session import Database
-from crucible.defender.llm import ScriptedDefenderLLM
 from crucible.defenses.config import DefenseConfig
+from crucible.experiments.config import (
+    ExperimentConfig,
+    ExperimentKind,
+    experiment_names,
+    load_experiment,
+    smoke_experiment,
+)
+from crucible.experiments.runner import (
+    ExperimentContext,
+    ProviderMismatch,
+    cost_estimate_minutes,
+    record_result,
+    run_layer_ablation,
+    run_loop_experiment,
+    run_model_overlap,
+    run_transfer,
+)
 from crucible.logging import configure_logging
 from crucible.loop.reports import RunReport, RunStatus
 from crucible.loop.runner import (
@@ -51,12 +66,18 @@ from crucible.loop.runner import (
     load_run_report,
     postgres_checkpointer,
 )
+from crucible.reporting import findings as findings_report
 from crucible.reporting.charts import coverage_grid, coverage_strip, three_curves
 from crucible.reporting.data import ReportData, gather
+from crucible.reporting.findings import StubbedRunRefused
 from crucible.reporting.markdown import render_round_report, render_run_report
 from crucible.reporting.redaction import present_payload
 from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RunRepository
+from crucible.schemas.experiments import (
+    LayerAblationResult,
+    LoopExperimentResult,
+)
 from crucible.services.cost_meter import BudgetExceeded
 from crucible.services.retry import (
     AuthenticationFailed,
@@ -64,7 +85,6 @@ from crucible.services.retry import (
     ProviderError,
     RateLimited,
 )
-from crucible.target.reference.llm import ScriptedTargetLLM
 
 console = Console()
 app = typer.Typer(add_completion=False, help="Crucible — a co-evolutionary red-team loop.")
@@ -76,6 +96,10 @@ app.add_typer(loop_app, name="loop")
 app.add_typer(report_app, name="report")
 app.add_typer(eval_app, name="eval")
 app.add_typer(archive_app, name="archive")
+experiment_app = typer.Typer(help="Run the committed Phase 8 experiments.")
+findings_app = typer.Typer(help="Regenerate the numbers in docs/findings.md.")
+app.add_typer(experiment_app, name="experiment")
+app.add_typer(findings_app, name="findings")
 
 
 #: Set by `--debug`. Off, a failure prints one actionable line; on, the
@@ -115,6 +139,18 @@ def _handled() -> Iterator[None]:
         if _debug:
             raise
         _fail(str(error), "Set the missing variables in .env; see .env.example.")
+    except StubbedRunRefused as error:
+        if _debug:
+            raise
+        _fail(
+            str(error),
+            "Run `crucible experiment run main --provider groq`, "
+            "or `--smoke` first to check the providers answer.",
+        )
+    except ProviderMismatch as error:
+        if _debug:
+            raise
+        _fail(str(error))
     except AuthenticationFailed as error:
         if _debug:
             raise
@@ -188,18 +224,42 @@ def _settings() -> Settings:
     return settings
 
 
-def _scripted_factories() -> LoopFactories:
-    """Offline clients.
+def _announce_provider(settings: Settings, provider: Provider) -> None:
+    """Say which models will run, before spending hours or quota on them."""
+    if provider is Provider.SCRIPTED:
+        console.print(
+            "[yellow]--provider scripted: this run uses deterministic test doubles. "
+            "It will be recorded as stubbed=true, every report will carry a STUBBED RUN "
+            "banner, and `crucible findings regenerate` will refuse its numbers.[/yellow]"
+        )
+        return
+    table = Table(title=f"provider: {provider.value} (live)")
+    table.add_column("agent")
+    table.add_column("model")
+    for role, model in (
+        ("target", settings.TARGET_MODEL),
+        ("attacker", settings.ATTACKER_MODEL),
+        ("defender", settings.DEFENDER_MODEL),
+        ("classifier", settings.CLASSIFIER_MODEL),
+    ):
+        table.add_row(role, model)
+    console.print(table)
+    unpriced = settings.unpriced_models()
+    if unpriced:
+        console.print(
+            f"[yellow]no price for {', '.join(unpriced)}: spend will record as NULL and "
+            f"ROUND_BUDGET_USD cannot be enforced for it[/yellow]"
+        )
 
-    TODO(phase-8): wire the Groq clients here behind `--provider groq`. The loop
-    itself is provider-agnostic; only these four factories change.
+
+def _factories(settings: Settings, provider: Provider, stack: AsyncExitStack) -> LoopFactories:
+    """The model clients for one run. Live unless `--provider scripted`.
+
+    Scripted clients are reachable only through that flag, and any run using
+    them is recorded as `stubbed=true`, bannered in every report, and refused by
+    `crucible findings regenerate`.
     """
-    return LoopFactories(
-        target_llm=ScriptedTargetLLM,
-        attacker_llm=ScriptedAttackerLLM,
-        defender_llm=ScriptedDefenderLLM,
-        classifier_client=ScriptedClassifierClient,
-    )
+    return build_factories(settings, provider, stack)
 
 
 @app.command()
@@ -243,9 +303,14 @@ def loop_start(
     mode: Annotated[str, typer.Option(help="black_box or white_box.")] = "black_box",
     budget: Annotated[float, typer.Option(help="Per-round spend cap in USD.")] = 5.00,
     seed_value: Annotated[int, typer.Option("--seed", help="Run seed.")] = 20260906,
+    provider: Annotated[
+        Provider,
+        typer.Option("--provider", help="groq (live) or scripted (test doubles, marked stubbed)."),
+    ] = Provider.GROQ,
 ) -> None:
     """Start a run. D(0) is always the empty config, so the loop starts weak."""
     settings = _settings()
+    _announce_provider(settings, provider)
     loop_settings = LoopSettings(
         rounds=rounds,
         mode=AttackerMode(mode),
@@ -253,12 +318,14 @@ def loop_start(
         seed=seed_value,
         provider_max_concurrency=settings.PROVIDER_MAX_CONCURRENCY,
         provider_min_interval_seconds=settings.PROVIDER_MIN_INTERVAL_SECONDS,
+        provider_tokens_per_minute=settings.PROVIDER_TOKENS_PER_MINUTE,
+        provider_requests_per_minute=settings.PROVIDER_REQUESTS_PER_MINUTE,
     )
-    report = asyncio.run(_start(settings, loop_settings))
+    report = asyncio.run(_start(settings, loop_settings, provider))
     _print_run(report)
 
 
-async def _start(settings: Settings, loop_settings: LoopSettings) -> RunReport:
+async def _start(settings: Settings, loop_settings: LoopSettings, provider: Provider) -> RunReport:
     database = Database(settings.DATABASE_URL)
     async with AsyncExitStack() as stack:
         stack.push_async_callback(database.close)
@@ -266,7 +333,7 @@ async def _start(settings: Settings, loop_settings: LoopSettings) -> RunReport:
         components = await build_components(
             database,
             settings=loop_settings,
-            factories=_scripted_factories(),
+            factories=_factories(settings, provider, stack),
             embedder=default_embedder(settings),
             allowlist=tuple(settings.TARGET_ALLOWLIST),
         )
@@ -279,14 +346,19 @@ async def _start(settings: Settings, loop_settings: LoopSettings) -> RunReport:
 @handled
 def loop_resume(
     run_id: Annotated[str, typer.Option("--run-id", help="The run to continue.")],
+    provider: Annotated[
+        Provider,
+        typer.Option("--provider", help="groq (live) or scripted (test doubles, marked stubbed)."),
+    ] = Provider.GROQ,
 ) -> None:
     """Continue a checkpointed run from where it stopped."""
     settings = _settings()
-    report = asyncio.run(_resume(settings, uuid.UUID(run_id)))
+    _announce_provider(settings, provider)
+    report = asyncio.run(_resume(settings, uuid.UUID(run_id), provider))
     _print_run(report)
 
 
-async def _resume(settings: Settings, run_id: uuid.UUID) -> RunReport:
+async def _resume(settings: Settings, run_id: uuid.UUID, provider: Provider) -> RunReport:
     database = Database(settings.DATABASE_URL)
     async with AsyncExitStack() as stack:
         stack.push_async_callback(database.close)
@@ -301,7 +373,7 @@ async def _resume(settings: Settings, run_id: uuid.UUID) -> RunReport:
         components = await build_components(
             database,
             settings=loop_settings,
-            factories=_scripted_factories(),
+            factories=_factories(settings, provider, stack),
             embedder=default_embedder(settings),
             allowlist=tuple(settings.TARGET_ALLOWLIST),
         )
@@ -350,6 +422,11 @@ async def _status(settings: Settings, run_id: uuid.UUID | None) -> None:
 
 
 def _print_run(report: RunReport) -> None:
+    banner = report.banner
+    if banner is not None:
+        console.print(f"[red]{banner}[/red]")
+    else:
+        console.print("[green]live run[/green]: " + ", ".join(report.provenance.render_lines()))
     colour = {
         RunStatus.COMPLETED: "green",
         RunStatus.HALTED: "yellow",
@@ -394,15 +471,21 @@ def _print_run(report: RunReport) -> None:
 def eval_defense(
     config_id: Annotated[str, typer.Argument(help="A DefenseConfig fingerprint.")],
     which: Annotated[EvalSet, typer.Option("--set")] = EvalSet.ARCHIVE,
+    provider: Annotated[
+        Provider,
+        typer.Option("--provider", help="groq (live) or scripted (test doubles)."),
+    ] = Provider.GROQ,
 ) -> None:
     """Evaluate one stored config against the archive, the holdout set, or utility."""
     settings = _settings()
-    asyncio.run(_eval(settings, config_id, which))
+    _announce_provider(settings, provider)
+    asyncio.run(_eval(settings, config_id, which, provider))
 
 
-async def _eval(settings: Settings, config_id: str, which: EvalSet) -> None:
+async def _eval(settings: Settings, config_id: str, which: EvalSet, provider: Provider) -> None:
     database = Database(settings.DATABASE_URL)
-    try:
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(database.close)
         async with database.session() as session:
             config = await DefenseConfigRepository(session).get(config_id)
         if config is None:
@@ -416,7 +499,7 @@ async def _eval(settings: Settings, config_id: str, which: EvalSet) -> None:
         components = await build_components(
             database,
             settings=loop_settings,
-            factories=_scripted_factories(),
+            factories=_factories(settings, provider, stack),
             embedder=default_embedder(settings),
             allowlist=tuple(settings.TARGET_ALLOWLIST),
         )
@@ -439,8 +522,6 @@ async def _eval(settings: Settings, config_id: str, which: EvalSet) -> None:
             f"archive block rate {full.archive_block_rate:.1%} over "
             f"{full.archive.evaluated} attacks; holdout {full.holdout_block_rate}"
         )
-    finally:
-        await database.close()
 
 
 @report_app.command("round")
@@ -574,7 +655,13 @@ def _write_charts(data: ReportData, directory: Path) -> list[Path]:
 
     return [
         three_curves(data.rounds, directory / "three_curves.png"),
-        coverage_grid(fitness, occupancy, directory / "coverage_grid.png", title="Final coverage"),
+        coverage_grid(
+            fitness,
+            occupancy,
+            directory / "coverage_grid.png",
+            title="Final coverage",
+            agreement=data.agreement,
+        ),
         coverage_strip(per_round, directory / "coverage_evolution.png"),
     ]
 
@@ -595,3 +682,255 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# --------------------------------------------------------------------------- #
+# Phase 8: experiments and findings
+# --------------------------------------------------------------------------- #
+
+
+@experiment_app.command("list")
+@handled
+def experiment_list() -> None:
+    """Every committed experiment, with a wall-clock estimate at 6500 TPM."""
+    table = Table(title="experiments")
+    for column in ("name", "kind", "rounds", "seed", "ablation", "~minutes"):
+        table.add_column(column)
+    for name in experiment_names():
+        config = load_experiment(name)
+        table.add_row(
+            name,
+            config.kind.value,
+            str(config.rounds),
+            str(config.seed),
+            config.ablation.value,
+            str(cost_estimate_minutes(config)),
+        )
+    console.print(table)
+    console.print(
+        "[dim]Estimates assume 6500 tokens per minute and an archive of ~90 attacks.[/dim]"
+    )
+
+
+@experiment_app.command("run")
+@handled
+def experiment_run(
+    name: Annotated[str, typer.Argument(help="An experiment in experiments/.")],
+    config_id: Annotated[
+        str | None,
+        typer.Option("--config-id", help="Defense config to replay. Defaults to the latest run's."),
+    ] = None,
+    provider: Annotated[
+        Provider,
+        typer.Option("--provider", help="groq (live) or scripted (test doubles, marked stubbed)."),
+    ] = Provider.GROQ,
+    rounds: Annotated[
+        int | None, typer.Option("--rounds", help="Override the config's round count.")
+    ] = None,
+    smoke: Annotated[
+        bool,
+        typer.Option(
+            "--smoke",
+            help="One round, live providers, small caps: about two minutes before a long run.",
+        ),
+    ] = False,
+) -> None:
+    """Run one committed experiment and store its result."""
+    settings = _settings()
+    experiment = load_experiment(name)
+    if smoke:
+        experiment = smoke_experiment(experiment)
+        console.print(
+            "[cyan]smoke run[/cyan]: 1 round, "
+            f"{experiment.candidates_per_round} candidates, "
+            f"{experiment.cells_per_round} cell(s), budget ${experiment.budget_usd}. "
+            "Checking that live providers answer, not measuring anything."
+        )
+    elif rounds is not None:
+        experiment = experiment.model_copy(update={"rounds": rounds})
+    _announce_provider(settings, provider)
+    if experiment.violates_never_cut:
+        console.print(
+            f"[yellow]{experiment.name} switches off a never-cut property on purpose: "
+            f"{experiment.ablation.value}. Its numbers are not comparable to the main run."
+            "[/yellow]"
+        )
+    console.print(
+        f"[cyan]{experiment.name}[/cyan] ({experiment.kind.value}), seed {experiment.seed}, "
+        f"estimated {cost_estimate_minutes(experiment)} minutes at 6500 TPM"
+    )
+    asyncio.run(_run_experiment(settings, experiment, config_id, provider))
+
+
+async def _run_experiment(
+    settings: Settings,
+    experiment: ExperimentConfig,
+    config_id: str | None,
+    provider: Provider,
+) -> None:
+    database = Database(settings.DATABASE_URL)
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(database.close)
+        context = ExperimentContext(
+            database=database,
+            embedder=default_embedder(settings),
+            factories=_factories(settings, provider, stack),
+            allowlist=tuple(settings.TARGET_ALLOWLIST),
+            checkpointer_settings=settings if experiment.kind is ExperimentKind.LOOP else None,
+        )
+
+        if experiment.kind is ExperimentKind.LOOP:
+            report = await run_loop_experiment(experiment, context)
+            await record_result(
+                database,
+                experiment,
+                LoopExperimentResult(
+                    run_id=str(report.run_id),
+                    rounds_completed=report.rounds_completed,
+                    status=report.status.value,
+                    halt_reason=report.halt_reason.value if report.halt_reason else None,
+                ),
+            )
+            _print_run(report)
+            await _print_cost(database, report)
+            return
+
+        if experiment.kind is ExperimentKind.LAYER_ABLATION:
+            rows = await run_layer_ablation(experiment, context, config_id=config_id)
+            await record_result(database, experiment, LayerAblationResult(rows=rows))
+            table = Table(title="layer ablation")
+            for column in ("layer", "block rate", "delta", "utility", "delta"):
+                table.add_column(column)
+            for row in rows:
+                table.add_row(
+                    row.layer,
+                    f"{row.archive_block_rate:.3f}",
+                    f"{row.delta_block_rate:+.3f}",
+                    f"{row.utility_pass_rate:.3f}",
+                    f"{row.delta_utility:+.3f}",
+                )
+            console.print(table)
+            return
+
+        if experiment.kind is ExperimentKind.TRANSFER:
+            result = await run_transfer(experiment, context, config_id=config_id)
+            await record_result(database, experiment, result)
+            console.print(
+                f"transfer to [cyan]{result.persona}[/cyan] "
+                f"({'within-family' if result.within_family else 'cross-family'}): "
+                f"D(0) {result.baseline_block_rate:.3f} -> final "
+                f"{result.hardened_block_rate:.3f} over {result.archive_size} attacks"
+            )
+            return
+
+        # model_overlap: two live clients on different families. A model this
+        # account cannot reach ends the experiment naming it.
+        if provider is Provider.SCRIPTED:
+            raise typer.BadParameter(
+                "model_overlap compares two real model families. Scripted clients would "
+                "produce an overlap of a stub with itself, which is not a measurement."
+            )
+        overlap = await run_model_overlap(
+            experiment,
+            context,
+            {
+                model: (lambda m=model: attacker_on(settings, m, stack))  # type: ignore[misc]
+                for model in experiment.models
+            },
+        )
+        await record_result(database, experiment, overlap)
+        table = Table(title="model overlap")
+        for column in ("model", "attacks", "cells"):
+            table.add_column(column)
+        for model in overlap.models:
+            table.add_row(
+                model,
+                str(overlap.attacks_per_model.get(model, 0)),
+                str(len(overlap.cells_per_model.get(model, []))),
+            )
+        console.print(table)
+        console.print(
+            f"cell overlap (Jaccard) `{overlap.cell_overlap:.3f}`; "
+            f"mean nearest-neighbour embedding distance "
+            f"`{overlap.mean_nearest_distance:.3f}`"
+        )
+
+
+async def _print_cost(database: Database, report: RunReport) -> None:
+    """What the run actually spent, from the rounds' own recorded cost.
+
+    A total of zero after live calls means the models in use have no price, so
+    `ROUND_BUDGET_USD` is inert — worth saying out loud rather than leaving to
+    be noticed.
+    """
+    del database
+    total = sum((round_report.cost_usd for round_report in report.rounds), Decimal(0))
+    console.print(f"cost: ${total:.6f}")
+    if total == 0 and not report.stubbed:
+        console.print(
+            "[yellow]cost is $0.000000 on a live run: the models in use have no entry in "
+            "MODEL_PRICING, so spend records as NULL and ROUND_BUDGET_USD cannot be "
+            "enforced[/yellow]"
+        )
+
+
+@findings_app.command("regenerate")
+@handled
+def findings_regenerate(
+    check: Annotated[
+        bool, typer.Option("--check", help="Rewrite nothing; exit 1 if a block is stale.")
+    ] = False,
+    path: Annotated[Path, typer.Option("--path")] = findings_report.FINDINGS_PATH,
+    run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    force_stubbed: Annotated[
+        bool,
+        typer.Option(
+            "--force-stubbed",
+            help="Write findings from a stubbed run anyway. Never for a published document.",
+        ),
+    ] = False,
+) -> None:
+    """Rewrite every generated block in docs/findings.md from stored data."""
+    settings = _settings()
+    # The read and write stay out here: file IO belongs in the sync command, and
+    # only the database pass is async.
+    data = asyncio.run(_findings_data(settings, uuid.UUID(run_id) if run_id else None))
+    if data.stubbed:
+        console.print(
+            "[red]the most recent run is STUBBED[/red]: "
+            + (", ".join(data.provenance.render_lines()) or "provenance not recorded")
+        )
+    findings_report.guard_stubbed(data, force=force_stubbed)
+    if force_stubbed and data.stubbed:
+        console.print(
+            "[yellow]--force-stubbed: writing numbers produced by test doubles. "
+            "This document must not be published or cited.[/yellow]"
+        )
+    markdown = path.read_text(encoding="utf-8")
+    if check:
+        stale = findings_report.stale_blocks(markdown, data)
+        if stale:
+            console.print(
+                f"[red]{path} is stale: {', '.join(stale)}[/red]\n"
+                "[dim]Run `crucible findings regenerate` and commit the result.[/dim]"
+            )
+            raise typer.Exit(code=1)
+        console.print(f"[green]{path} matches the stored data[/green]")
+        return
+
+    rewritten = findings_report.rewrite(markdown, data)
+    if rewritten == markdown:
+        console.print(f"{path} already up to date")
+        return
+    path.write_text(rewritten, encoding="utf-8")
+    console.print(f"wrote {path}")
+
+
+async def _findings_data(
+    settings: Settings, run_id: uuid.UUID | None
+) -> findings_report.FindingsData:
+    database = Database(settings.DATABASE_URL)
+    try:
+        return await findings_report.gather(database, run_id=run_id)
+    finally:
+        await database.close()

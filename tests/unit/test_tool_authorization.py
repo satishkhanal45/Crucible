@@ -121,4 +121,4 @@ async def test_only_privileged_tools_return_the_tool_canary(
 
     assert scan_text(profile, canaries).matches == ()
     assert CanaryClass.TOOL in scan_text(receipt, canaries).breached_classes
-    assert runtime.sent_emails == [{"to": "ops@example.test", "body": "please action this"}]
+    assert runtime.sent_records == [{"to": "ops@example.test", "body": "please action this"}]

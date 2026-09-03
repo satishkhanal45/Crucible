@@ -33,7 +33,12 @@ class RunRepository:
         budget_usd: Decimal,
         seed: int,
         settings: dict[str, Any],
+        stubbed: bool = True,
+        provenance: dict[str, Any] | None = None,
     ) -> RunRow:
+        # `stubbed` defaults to True: a run that does not say what produced it
+        # cannot be read as a measurement, and the safe default is the one that
+        # refuses to be cited.
         row = RunRow(
             id=run_id,
             status=RunStatus.RUNNING.value,
@@ -44,6 +49,8 @@ class RunRepository:
             budget_usd=budget_usd,
             seed=seed,
             settings=settings,
+            stubbed=stubbed,
+            provenance=provenance or {},
         )
         self._session.add(row)
         await self._session.flush()

@@ -164,19 +164,29 @@ class CostMeter:
         provider: str,
         model: str,
         retry_policy: RetryPolicy | None = None,
+        estimated_tokens: int = 0,
     ) -> T:
         """Run a provider call with backoff, meter it, and return its value.
 
         `BudgetExceeded` is raised after the spend is recorded, so the ledger
         always reflects what was actually consumed.
+
+        `estimated_tokens` is what the caller expects the call to cost; the
+        pacer books it against the model's token-per-minute window before the
+        request goes out and the reported usage replaces it afterwards.
         """
         await self.ensure_within_budget(round_id)
 
         async def paced() -> MeteredResult[T]:
             # Inside the retried callable, so a backoff and the pacer's own
-            # interval compose instead of racing.
-            async with self._pacer.slot():
-                return await provider_call()
+            # interval compose instead of racing, and so a retry books its own
+            # tokens rather than riding the first attempt's reservation.
+            async with self._pacer.slot(
+                model=price_key(provider, model), estimated_tokens=estimated_tokens
+            ) as reservation:
+                result = await provider_call()
+                reservation.reconcile(result.usage.total_tokens)
+                return result
 
         result = await retry_async(paced, retry_policy or self._retry_policy)
         await self.record(round_id=round_id, provider=provider, model=model, usage=result.usage)

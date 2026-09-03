@@ -1,0 +1,24 @@
+# Which of the five layers is actually doing the blocking?
+#
+# Replays the FINAL archive against the final config with each layer disabled in
+# turn, resolving configs from the `defense_configs` table by id. No new attacks
+# are generated and no model call is made for generation: this is evaluation
+# only, so it is much cheaper than a round.
+#
+# Leave source_run_id null to use the most recent completed run.
+name: layer_ablation
+kind: layer_ablation
+description: >-
+  Six evaluations over the final non-holdout archive: the full config, then the
+  same config with each of input, context, prompt, output and structural
+  disabled in turn. Outputs a table.
+rounds_rationale: >-
+  Not a loop: one full-archive evaluation per layer, six in total. At 6500 TPM
+  an archive of roughly 90 attacks takes about 20 minutes per evaluation.
+seed: 20260906
+rounds: 1
+budget_usd: "6.00"
+concurrency: 1
+persona: northwind
+source_run_id: null
+ablation: none

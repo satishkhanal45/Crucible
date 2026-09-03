@@ -1,0 +1,24 @@
+# Ablation 2: the utility term off.
+#
+# THIS CONFIG VIOLATES A NEVER-CUT PROPERTY, ON PURPOSE, EXACTLY ONCE.
+# docs/spec.md section 12 weights utility_loss at 2.0 so that a config which
+# blocks everything loses to one that blocks less and keeps the benign tasks
+# working. With the weight at 0 the defender should converge on refusing more or
+# less everything, and the benign pass rate should collapse while the block rate
+# looks excellent. That is the point: it is the number that shows why the term
+# is there. `ExperimentConfig` refuses this knob in any other config.
+name: ablation_utility
+kind: loop
+description: >-
+  Three rounds with the weight on utility_loss set to 0, measuring what the
+  selection objective buys by keeping it at 2.0.
+rounds_rationale: >-
+  Three rounds. Long enough for the defender to over-block; the shape appears in
+  the benign pass rate by round two.
+seed: 20260906
+rounds: 3
+mode: black_box
+budget_usd: "3.00"
+concurrency: 1
+utility_weight: 0.0
+ablation: ablation_utility

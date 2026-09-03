@@ -1,0 +1,23 @@
+# The headline run. Full stack, nothing switched off.
+#
+# D(0) is DefenseConfig.empty() by decision of the technical director: the loop
+# has to start weak and be shown to harden. That is not configurable here.
+name: main
+kind: loop
+description: >-
+  Six rounds, black-box attacker, full defense stack, D(0) = empty(). This is the
+  run every other experiment is measured against.
+rounds_rationale: >-
+  Six rounds, not the spec's 8-10. At 6500 tokens per minute a full-archive
+  re-evaluation of roughly 90 attacks takes about 20 minutes, so a late round
+  costs one to two hours of wall clock. Six rounds is what fits an overnight run
+  with the free-tier limit in force. Recorded as a limitation in findings.
+seed: 20260906
+rounds: 6
+mode: black_box
+budget_usd: "5.00"
+concurrency: 1
+candidates_per_round: 4
+cells_per_round: 4
+persona: northwind
+ablation: none

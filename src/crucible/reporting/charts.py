@@ -16,6 +16,7 @@ notebook separates a measurement from a caption.
 
 from __future__ import annotations
 
+import textwrap
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from matplotlib.patches import Rectangle
 from crucible.archive.grid import all_cell_keys
 from crucible.loop.reports import RoundReport
 from crucible.loop.statistics import Proportion
+from crucible.schemas.agreement import UNMEASURED_CAPTION, ClassifierAgreement
 from crucible.schemas.taxonomy import GRID_DENOMINATOR
 
 MONO = ["DejaVu Sans Mono", "monospace"]
@@ -38,6 +40,8 @@ SANS = ["DejaVu Sans", "sans-serif"]
 #: Quiet ink for everything that is not the coverage grid.
 INK = "#1c1c1c"
 MUTED = "#8a8a8a"
+#: For a caption that says a number should not be trusted.
+SOFT = "#a8541f"
 SERIES = {
     "archive": ("#2f6f9f", "o", "-", "//"),
     "holdout": ("#b4552d", "s", "--", "\\\\"),
@@ -174,6 +178,7 @@ def coverage_grid(
     path: Path,
     *,
     title: str = "Coverage",
+    agreement: ClassifierAgreement | None = None,
 ) -> Path:
     """The 96-cell grid: the signature visual.
 
@@ -256,7 +261,30 @@ def coverage_grid(
         fontsize=8,
         color=MUTED,
     )
+    # The grid's columns ARE the technique axis, so a reader looking at it is
+    # exactly the reader who needs to know how much that axis can be trusted.
+    caption = agreement.caption() if agreement is not None else UNMEASURED_CAPTION
+    # Below the rotated technique labels, because the caption is about those
+    # columns. `supxlabel` participates in the constrained layout, so a two-line
+    # caption makes room for itself instead of running off the figure.
+    figure.supxlabel(
+        _wrap(caption),
+        fontsize=8,
+        color=SOFT if agreement is None or agreement.technique_is_soft else MUTED,
+        fontfamily=MONO,
+        ha="left",
+        x=0.01,
+    )
     return _save(figure, path)
+
+
+#: Caption width in characters, so a long agreement line wraps rather than
+#: running off the figure.
+CAPTION_WIDTH = 110
+
+
+def _wrap(text: str) -> str:
+    return "\n".join(textwrap.wrap(text, CAPTION_WIDTH)) or text
 
 
 def coverage_strip(per_round: Sequence[tuple[int, Mapping[str, int]]], path: Path) -> Path:

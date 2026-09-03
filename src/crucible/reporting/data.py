@@ -10,11 +10,14 @@ from crucible.archive.grid import Coverage, coverage
 from crucible.db.session import Database
 from crucible.defenses.config import DefenseConfig
 from crucible.loop.reports import RoundReport, RunReport
+from crucible.repositories.agreement import ClassifierAgreementRepository
 from crucible.repositories.attacks import AttackRepository
 from crucible.repositories.cells import CellRepository
 from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RoundRepository, RunRepository
+from crucible.schemas.agreement import ClassifierAgreement
 from crucible.schemas.archive import ArchivedAttack, CellRecord
+from crucible.schemas.provenance import RunProvenance
 
 
 class GeneralAttack(BaseModel):
@@ -48,6 +51,9 @@ class ReportData(BaseModel):
     archive_size: int = 0
     holdout_size: int = 0
     unclassified: int = 0
+    #: How far the real classifier agrees with the hand labels the cells were
+    #: built from. None when it has never been measured, which reports say.
+    agreement: ClassifierAgreement | None = None
 
     @property
     def rounds(self) -> tuple[RoundReport, ...]:
@@ -94,6 +100,7 @@ async def gather(database: Database, run_id: uuid.UUID, *, top: int = 10) -> Rep
             )
 
         cells = await CellRepository(session).occupied()
+        agreement = await ClassifierAgreementRepository(session).latest()
         stored = await DefenseConfigRepository(session).list_for_run(run_id)
         configs = {record.id: record.config for record in stored}
         for round_report in rounds:
@@ -114,6 +121,8 @@ async def gather(database: Database, run_id: uuid.UUID, *, top: int = 10) -> Rep
         final_config_id=run_row.current_config_id,
         rounds=tuple(rounds),
         halt_reason=HaltReason(run_row.halt_reason) if run_row.halt_reason else None,
+        provenance=RunProvenance.model_validate(run_row.provenance or {}),
+        stubbed=bool(run_row.stubbed),
     )
     return ReportData(
         run=run,
@@ -124,4 +133,5 @@ async def gather(database: Database, run_id: uuid.UUID, *, top: int = 10) -> Rep
         archive_size=len(attacks),
         holdout_size=holdout,
         unclassified=unclassified,
+        agreement=agreement,
     )

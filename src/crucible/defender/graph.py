@@ -43,7 +43,7 @@ from crucible.defender.state import (
     RejectedProposal,
 )
 from crucible.defenses.config import DefenseConfig, UnsafeDefense
-from crucible.evaluation.objective import ObjectiveScore, score
+from crucible.evaluation.objective import UTILITY_WEIGHT, ObjectiveScore, score
 from crucible.evaluation.service import DefenseEvaluation
 from crucible.logging import get_logger
 
@@ -109,6 +109,7 @@ class Defender:
         *,
         candidates: int = DEFAULT_CANDIDATES,
         max_propose_rounds: int = MAX_PROPOSE_ROUNDS,
+        utility_weight: float = UTILITY_WEIGHT,
     ) -> None:
         if not 3 <= candidates <= 5:
             raise ValueError("the defender proposes three to five candidates per round")
@@ -116,6 +117,9 @@ class Defender:
         self._evaluation = evaluation
         self._candidates = candidates
         self._max_rounds = max_propose_rounds
+        # 2.0 everywhere except `experiments/ablation_utility.yaml`, which is
+        # the one place the weight may be moved and is labelled for it.
+        self._utility_weight = utility_weight
         self._graph = self._build()
 
     @property
@@ -250,7 +254,7 @@ class Defender:
 
         current_result = results.get(current.fingerprint())
         current_score = (
-            _score_of(current, current_result, baseline).value
+            _score_of(current, current_result, baseline, self._utility_weight).value
             if current_result is not None
             else 0.0
         )
@@ -261,7 +265,7 @@ class Defender:
             result = results.get(proposal.config_id)
             if result is None:
                 continue
-            value = _score_of(proposal.config, result, baseline).value
+            value = _score_of(proposal.config, result, baseline, self._utility_weight).value
             scores[proposal.config_id] = value
             if best is None or value > best[0]:
                 best = (value, proposal)
@@ -337,7 +341,10 @@ class Defender:
 
 
 def _score_of(
-    config: DefenseConfig, evaluation: DefenseEvaluation, baseline: float
+    config: DefenseConfig,
+    evaluation: DefenseEvaluation,
+    baseline: float,
+    weight: float = UTILITY_WEIGHT,
 ) -> ObjectiveScore:
     return score(
         archive_block_rate=evaluation.archive_block_rate,
@@ -345,4 +352,5 @@ def _score_of(
         config_utility=evaluation.utility_pass_rate,
         mean_latency_ms=evaluation.mean_latency_ms,
         config_complexity=config.complexity,
+        weight=weight,
     )

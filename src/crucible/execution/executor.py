@@ -107,6 +107,16 @@ class AttemptExecutor:
         self._metrics = ExecutionMetrics()
 
     @property
+    def pool(self) -> TargetPool:
+        """The bounded pool of isolated targets, read-only.
+
+        Exposed so the transfer test can assert that whatever the pool hands out
+        satisfies `TargetAdapter` — the Protocol is what lets the loop run
+        against a second application unchanged, so it is worth asserting.
+        """
+        return self._pool
+
+    @property
     def llm(self) -> object | None:
         """The pooled targets' model client, for per-round cost scoping.
 

@@ -1,0 +1,23 @@
+# Ablation 3: the defender sees only the current round.
+#
+# THIS CONFIG VIOLATES A NEVER-CUT PROPERTY, ON PURPOSE, EXACTLY ONCE.
+# Normally the defender is shown every non-holdout attack that breaches the
+# current config, and the recorded block rate always comes from the whole
+# archive. Blinded to everything but this round, the defender should fix the
+# newest attacks and reopen older ones: the regression check should fire, and
+# fire repeatedly. `ExperimentConfig` refuses this knob in any other config.
+name: ablation_archive
+kind: loop
+description: >-
+  Three rounds with the defender's breach view restricted to attacks generated
+  in the current round, measuring what memory of the archive is worth.
+rounds_rationale: >-
+  Three rounds. Two are needed before a regression is even possible; the third
+  shows whether it repeats.
+seed: 20260906
+rounds: 3
+mode: black_box
+budget_usd: "3.00"
+concurrency: 1
+defender_scope: current_round
+ablation: ablation_archive

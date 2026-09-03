@@ -48,6 +48,16 @@ seed:
 
 corpus:
 	$(UV) python -m crucible.target.reference.corpus_gen
+	$(UV) python -m crucible.target.clinic.corpus_gen
+
+findings: .env ## regenerate every generated block in docs/findings.md
+	$(UV) crucible findings regenerate
+
+findings-check: .env ## fail if a committed number differs from the stored data
+	$(UV) crucible findings regenerate --check
+
+experiments: ## list the committed experiments with time estimates
+	$(UV) crucible experiment list
 
 archive-stats:
 	$(UV) python -m crucible.cli.archive

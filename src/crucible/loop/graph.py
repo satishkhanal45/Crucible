@@ -28,7 +28,7 @@ impossible rather than merely discouraged.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
@@ -57,6 +57,7 @@ from crucible.repositories.attempts import AttemptRepository
 from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RoundRepository
 from crucible.schemas.outcome import Outcome
+from crucible.schemas.provenance import RunProvenance
 from crucible.services.cost_meter import BudgetExceeded, CostMeter
 from crucible.target.adapter import BehaviorSpec, TargetCapabilities
 
@@ -77,6 +78,12 @@ class LoopComponents:
     capabilities: TargetCapabilities
     behavior: BehaviorSpec
     budget_usd: Decimal
+    #: Which provider and model each agent used, and whether any was a stub.
+    provenance: RunProvenance = field(default_factory=RunProvenance)
+    #: `current_round` blinds the defender to everything but this round's
+    #: breaches. It is a never-cut violation and only `experiments/
+    #: ablation_archive.yaml` may set it; `ExperimentConfig` enforces that.
+    defender_scope: str = "archive"
 
     def scope_round(self, round_id: uuid.UUID) -> None:
         """Point every metered client at this round's cost bucket."""
@@ -201,7 +208,7 @@ class CoEvolutionLoop:
         """Steps 4-6: show the defender non-holdout breaches, screen, select."""
         round_number = int(state["round_number"])
         config = state["current_config"]
-        breaches = await self._breaches_for_defender(config)
+        breaches = await self._breaches_for_defender(config, round_number)
 
         defender_state: DefenderState = {
             "round": round_number,
@@ -486,11 +493,21 @@ class CoEvolutionLoop:
             attack_id for attack_id in attack_ids if outcomes.get(attack_id) is Outcome.BREACHED
         ]
 
-    async def _breaches_for_defender(self, config: DefenseConfig) -> list[BreachSummary]:
-        """Step 4's input. Holdout is filtered in SQL and never reaches here."""
+    async def _breaches_for_defender(
+        self, config: DefenseConfig, round_number: int
+    ) -> list[BreachSummary]:
+        """Step 4's input. Holdout is filtered in SQL and never reaches here.
+
+        Under the archive ablation the view is narrowed to this round, which is
+        the whole of that experiment: the defender then fixes the newest attacks
+        with no memory of the older ones, and the regression check is expected
+        to fire.
+        """
+        blind = self._parts.defender_scope == "current_round"
         async with self._parts.database.session() as session:
             attacks = await AttackRepository(session).get_attacks_for_defender(
-                defense_config_id=config.fingerprint()
+                defense_config_id=config.fingerprint(),
+                round_number=round_number if blind else None,
             )
         return [
             BreachSummary(

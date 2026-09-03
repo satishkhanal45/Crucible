@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from crucible.logging import get_logger
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
+from crucible.services.pacing import estimate_tokens
 from crucible.services.retry import provider_error_for
 from crucible.target.adapter import ToolSpec
 
@@ -272,11 +273,14 @@ class MeteredTargetLLM:
             reply = await self._inner.complete(messages, tools)
             return MeteredResult(value=reply, usage=reply.usage)
 
+        assembled = "\n".join(message.content for message in messages)
+        tool_text = "".join(f"{spec.name}{spec.description}" for spec in tools)
         return await self._meter.call(
             call,
             round_id=self._round_id,
             provider=self._inner.provider,
             model=self._inner.model,
+            estimated_tokens=estimate_tokens(assembled + tool_text),
         )
 
 

@@ -8,10 +8,7 @@ compare.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
-
-import pytest
-from alembic.config import Config
+from collections.abc import Callable
 
 from crucible.db.session import Database
 from crucible.defenses.config import (
@@ -44,16 +41,6 @@ HARDENED = DefenseConfig(
         tool_allowlist=("send_email",), require_user_origin_for_privileged=True
     ),
 )
-
-
-@pytest.fixture
-async def database(database_url: str, migrated: Config) -> AsyncIterator[Database]:
-    del migrated
-    handle = Database(database_url)
-    try:
-        yield handle
-    finally:
-        await handle.close()
 
 
 # ------------------------------------------------------------------ test 8

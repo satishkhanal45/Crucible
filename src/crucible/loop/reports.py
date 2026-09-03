@@ -16,6 +16,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from crucible.loop.statistics import Proportion
+from crucible.schemas.provenance import RunProvenance
 
 
 class BareRate(ValueError):
@@ -148,6 +149,21 @@ class RunReport(BaseModel):
     final_config_id: str
     rounds: tuple[RoundReport, ...] = ()
     halt_reason: HaltReason | None = None
+    #: Which provider and model each agent used. A run whose provenance is empty
+    #: cannot prove it was live, which is why `stubbed` defaults to True.
+    provenance: RunProvenance = RunProvenance()
+    stubbed: bool = True
+
+    @property
+    def banner(self) -> str | None:
+        """The warning a report leads with, or None when the run is live."""
+        if not self.stubbed:
+            return None
+        return self.provenance.banner() or (
+            "STUBBED RUN — NOT A MEASUREMENT. This run did not record which "
+            "models produced it, so it cannot be read as a measurement. "
+            "Re-run with `--provider groq`."
+        )
 
     @property
     def rounds_completed(self) -> int:

@@ -15,6 +15,9 @@ from typer.testing import CliRunner
 
 from crucible.cli import main as cli_main
 from crucible.config import ConfigurationError
+from crucible.experiments.runner import ProviderMismatch
+from crucible.reporting.findings import StubbedRunRefused
+from crucible.schemas.provenance import RunProvenance
 from crucible.services.cost_meter import BudgetExceeded
 from crucible.services.retry import AuthenticationFailed, ModelNotFound, RateLimited
 
@@ -50,6 +53,8 @@ def _app_raising(error: BaseException) -> typer.Typer:
         (RateLimited("429 forever"), "rate limit"),
         (BudgetExceeded(None, Decimal("6"), Decimal("5")), "ROUND_BUDGET_USD"),
         (ConnectionRefusedError(111, "Connection refused"), "database"),
+        (StubbedRunRefused(RunProvenance()), "STUBBED"),
+        (ProviderMismatch("qwen/qwen3.6-27b", "stub"), "qwen/qwen3.6-27b"),
     ],
 )
 def test_a_known_failure_prints_one_actionable_line(error: BaseException, expected: str) -> None:
@@ -60,7 +65,11 @@ def test_a_known_failure_prints_one_actionable_line(error: BaseException, expect
     assert "Traceback" not in result.output
     # A message and a hint. Counting physical lines would measure rich's
     # wrapping at the terminal width, not the shape of what was printed.
-    assert len(result.output) <= 400, result.output
+    # A message and a hint, and nothing like a traceback. The bound is on the
+    # whole output rather than on line count, because rich wraps at the
+    # terminal width and where a line breaks is not the property under test.
+    assert len(result.output) <= 600, result.output
+    assert result.output.count('File "') == 0, "no stack frames"
 
 
 def test_the_model_not_found_line_names_the_model() -> None:

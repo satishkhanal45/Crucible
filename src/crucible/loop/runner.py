@@ -21,6 +21,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 
 from crucible.archive.classifier import ClassifierClient, TaxonomyClassifier
+from crucible.archive.novelty import MIN_NOVELTY
 from crucible.archive.service import ArchiveService, BoundNoveltyGate
 from crucible.archive.survey import ArchiveSurvey
 from crucible.attacker.graph import Attacker
@@ -31,6 +32,7 @@ from crucible.db.session import Database
 from crucible.defender.graph import Defender
 from crucible.defender.llm import DefenderLLM, MeteredDefenderLLM
 from crucible.defenses.config import DefenseConfig
+from crucible.evaluation.objective import UTILITY_WEIGHT
 from crucible.evaluation.service import EvaluationService, PoolBenignRunner
 from crucible.execution.egress import EgressGuard
 from crucible.execution.executor import AttemptExecutor, ExecutorSettings
@@ -43,11 +45,13 @@ from crucible.oracle import Oracle
 from crucible.repositories.configs import DefenseConfigRepository
 from crucible.repositories.rounds import RoundRepository, RunRepository
 from crucible.repositories.spend import DatabaseSpendRepository
+from crucible.schemas.provenance import STUB_PROVIDER, AgentModel, RunProvenance
 from crucible.services.cost_meter import BudgetExceeded, CostMeter, ModelPrice
 from crucible.services.embeddings import Embedder, embedder_from_settings
 from crucible.services.pacing import ProviderPacer
 from crucible.target.adapter import TargetAdapter
 from crucible.target.canary import CanarySet
+from crucible.target.personas import persona_for
 from crucible.target.reference.llm import MeteredTargetLLM, TargetLLM
 from crucible.target.reference.store import DocumentStore
 from crucible.target.reference.target import ReferenceTarget
@@ -70,6 +74,17 @@ class LoopSettings(BaseModel):
     #: so a pool wider than the provider bound would only queue inside the meter.
     provider_max_concurrency: int = Field(default=1, ge=1, le=16)
     provider_min_interval_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
+    #: Per-model rolling window. 0 disables it, which is what offline runs use.
+    provider_tokens_per_minute: int = Field(default=0, ge=0, le=10_000_000)
+    provider_requests_per_minute: int = Field(default=0, ge=0, le=10_000)
+    #: The three guarded knobs, defaulting to their never-cut values. Only a
+    #: named ablation in `experiments/` may move one; `ExperimentConfig` is
+    #: where that is enforced, before a `LoopSettings` is ever built.
+    min_novelty: float = Field(default=MIN_NOVELTY, ge=0.0, le=1.0)
+    utility_weight: float = Field(default=UTILITY_WEIGHT, ge=0.0, le=10.0)
+    defender_scope: str = "archive"
+    #: Which application the loop runs against. `meridian` is the transfer target.
+    persona: str = "northwind"
     candidates_per_round: int = Field(default=4, ge=3, le=5)
     cells_per_round: int = Field(default=4, ge=1, le=16)
 
@@ -99,7 +114,10 @@ async def build_components(
 ) -> LoopComponents:
     """Wire every component one run needs."""
     pacer = ProviderPacer.from_settings(
-        settings.provider_min_interval_seconds, settings.provider_max_concurrency
+        settings.provider_min_interval_seconds,
+        settings.provider_max_concurrency,
+        tokens_per_minute=settings.provider_tokens_per_minute,
+        requests_per_minute=settings.provider_requests_per_minute,
     )
     cost_meter = (
         CostMeter(
@@ -112,12 +130,17 @@ async def build_components(
         else CostMeter(DatabaseSpendRepository(database), settings.budget_usd, pacer=pacer)
     )
 
+    persona = persona_for(settings.persona)
+
     async def factory(namespace: str) -> TargetAdapter:
-        store = DocumentStore(database, embedder, namespace=namespace)
+        # The namespace carries the persona, so two applications never share a
+        # stored corpus even when they run in the same database.
+        store = DocumentStore(database, embedder, namespace=f"{persona.key}-{namespace}")
         target = ReferenceTarget(
             store,
             MeteredTargetLLM(factories.target_llm(), cost_meter),
             CanarySet.mint(),
+            persona=persona,
         )
         await target.seed(corpus)
         return target
@@ -136,7 +159,9 @@ async def build_components(
     )
     # Seeded from the run, so holdout assignment is reproducible: two runs with
     # the same seed must build the same archive, holdout set included.
-    archive = ArchiveService(database, embedder, rng=random.Random(settings.seed))
+    archive = ArchiveService(
+        database, embedder, rng=random.Random(settings.seed), min_novelty=settings.min_novelty
+    )
     evaluation = EvaluationService(database, executor, PoolBenignRunner(pool))
     classifier = TaxonomyClassifier(factories.classifier_client(), cost_meter)
 
@@ -151,10 +176,12 @@ async def build_components(
         MeteredDefenderLLM(factories.defender_llm(), cost_meter),
         evaluation,
         candidates=settings.candidates_per_round,
+        utility_weight=settings.utility_weight,
     )
 
     async with pool.acquire() as target:
         capabilities = target.capabilities()
+        target_llm = target.llm  # type: ignore[attr-defined]
 
     return LoopComponents(
         database=database,
@@ -167,7 +194,32 @@ async def build_components(
         capabilities=capabilities,
         behavior=capabilities.behavior,
         budget_usd=settings.budget_usd,
+        defender_scope=settings.defender_scope,
+        # Read from the clients themselves rather than from the settings that
+        # were meant to build them: what ran is what gets recorded.
+        provenance=RunProvenance(
+            agents=(
+                _agent("target", target_llm),
+                _agent("attacker", attacker.llm),
+                _agent("defender", defender.llm),
+                _agent("classifier", classifier.client),
+            )
+        ),
     )
+
+
+def _agent(role: str, client: object) -> AgentModel:
+    """One agent's self-reported provider and model.
+
+    A client that cannot say what it is counts as a stub: an unidentifiable
+    model is not a measurement, and defaulting to "live" here would be the one
+    mistake this whole mechanism exists to prevent.
+    """
+    provider = getattr(client, "provider", None)
+    model = getattr(client, "model", None)
+    if not isinstance(provider, str) or not isinstance(model, str):
+        return AgentModel(role=role, provider=STUB_PROVIDER, model="unidentified")
+    return AgentModel(role=role, provider=provider, model=model)
 
 
 def checkpointer_url(database_url: str) -> str:
@@ -222,6 +274,24 @@ class LoopRunner:
         run = run_id or uuid.uuid4()
         self._last_run_id = run
         config = starting_config or DefenseConfig.empty()
+        provenance = self._loop._parts.provenance
+        if provenance.stubbed:
+            logger.warning(
+                "run.stubbed",
+                extra={
+                    "run_id": str(run),
+                    "agents": provenance.render_lines(),
+                    "detail": (
+                        "at least one agent is a scripted stub; this run's numbers "
+                        "are not a measurement and reports will say so"
+                    ),
+                },
+            )
+        else:
+            logger.info(
+                "run.provenance",
+                extra={"run_id": str(run), "agents": provenance.render_lines()},
+            )
 
         try:
             baseline = await self._loop._parts.evaluation.evaluate_utility(config)
@@ -241,6 +311,8 @@ class LoopRunner:
                 budget_usd=self._settings.budget_usd,
                 seed=self._settings.seed,
                 settings=self._settings.to_dict(),
+                stubbed=provenance.stubbed,
+                provenance=provenance.model_dump(mode="json"),
             )
 
         initial: LoopState = {
@@ -348,6 +420,8 @@ class LoopRunner:
             final_config_id=current.fingerprint(),
             rounds=tuple(rounds),
             halt_reason=reason,
+            provenance=self._loop._parts.provenance,
+            stubbed=self._loop._parts.provenance.stubbed,
         )
 
 
@@ -366,6 +440,8 @@ async def load_run_report(database: Database, run_id: uuid.UUID) -> RunReport | 
         final_config_id=run.current_config_id,
         rounds=tuple(rounds),
         halt_reason=HaltReason(run.halt_reason) if run.halt_reason else None,
+        provenance=RunProvenance.model_validate(run.provenance or {}),
+        stubbed=bool(run.stubbed),
     )
 
 

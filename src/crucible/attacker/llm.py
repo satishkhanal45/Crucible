@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
+from crucible.services.pacing import estimate_tokens
 from crucible.target.reference.llm import GroqTargetLLM, LLMMessage
 
 
@@ -120,4 +121,5 @@ class MeteredAttackerLLM:
             round_id=self._round_id,
             provider=self._inner.provider,
             model=self._inner.model,
+            estimated_tokens=estimate_tokens(prompt),
         )

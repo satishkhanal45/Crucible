@@ -45,7 +45,7 @@ from crucible.target.adapter import (
 )
 from crucible.target.canary import CanaryClass, CanarySet
 from crucible.target.contract import validate_output_contract
-from crucible.target.reference.corpus_gen import DOCSECRET_DOC_ID, load_corpus
+from crucible.target.persona import TargetPersona, ToolRuntimeProtocol
 from crucible.target.reference.llm import (
     TARGET_TEMPERATURE,
     LLMMessage,
@@ -53,16 +53,14 @@ from crucible.target.reference.llm import (
     RequestedToolCall,
     TargetLLM,
 )
-from crucible.target.reference.prompts import ASSISTANT_NAME, build_system_prompt
+from crucible.target.reference.persona import NORTHWIND
 from crucible.target.reference.sessions import (
     SessionHistory,
     SessionTurn,
     clone,
-    pristine_sessions,
     visible_history,
 )
 from crucible.target.reference.store import DocumentStore
-from crucible.target.reference.tools import TOOL_SPECS, ToolRuntime
 
 logger = get_logger(__name__)
 
@@ -131,8 +129,9 @@ class ReferenceTarget:
         llm: TargetLLM,
         canaries: CanarySet,
         *,
-        tools: Sequence[ToolSpec] = TOOL_SPECS,
+        tools: Sequence[ToolSpec] | None = None,
         endpoint: str | None = None,
+        persona: TargetPersona = NORTHWIND,
     ) -> None:
         # "Every LLM call routes through CostMeter. No exceptions." Enforced here
         # rather than trusted, because an unmetered path would silently break
@@ -148,7 +147,10 @@ class ReferenceTarget:
         # endpoint so the executor can refuse to run it off the allowlist.
         self._endpoint = endpoint
         self._canaries = canaries
-        self._tools = tuple(tools)
+        # The persona is the whole of what differs between two applications
+        # behind this adapter: role, corpus, tools. See `crucible.target.persona`.
+        self._persona = persona
+        self._tools = tuple(tools) if tools is not None else persona.tools
         self._sessions: dict[str, SessionHistory] = {}
         self._base_documents: tuple[Document, ...] = ()
         self._pristine_documents: tuple[DocumentRecord, ...] = ()
@@ -159,7 +161,9 @@ class ReferenceTarget:
 
     async def seed(self, documents: Sequence[Document] | None = None) -> int:
         """Load the corpus, plant the canaries, and take the pristine snapshot."""
-        self._base_documents = tuple(documents) if documents is not None else load_corpus()
+        self._base_documents = (
+            tuple(documents) if documents is not None else self._persona.load_corpus()
+        )
         planted = tuple(self._plant_document_canary(document) for document in self._base_documents)
 
         records = await self._store.records_for(planted)
@@ -167,7 +171,7 @@ class ReferenceTarget:
         await self._store.load(records)
 
         self._pristine_documents = records
-        self._pristine_sessions = pristine_sessions(self._canaries)
+        self._pristine_sessions = dict(self._persona.sessions(self._canaries))
         self._sessions = clone(self._pristine_sessions)
         self._seeded = True
         logger.info(
@@ -189,25 +193,27 @@ class ReferenceTarget:
         session history are built from the set on every turn.
         """
         self._canaries = canaries
-        self._pristine_sessions = pristine_sessions(canaries)
+        self._pristine_sessions = dict(self._persona.sessions(canaries))
         self._sessions = clone(self._pristine_sessions)
         if not self._seeded:
             return
 
-        carrier = next((d for d in self._base_documents if d.doc_id == DOCSECRET_DOC_ID), None)
+        carrier = next(
+            (d for d in self._base_documents if d.doc_id == self._persona.docsecret_doc_id), None
+        )
         if carrier is None:
             return
         planted = self._plant_document_canary(carrier)
         (record,) = await self._store.records_for([planted])
         await self._store.load([record])
         self._pristine_documents = tuple(
-            record if existing.document.doc_id == DOCSECRET_DOC_ID else existing
+            record if existing.document.doc_id == self._persona.docsecret_doc_id else existing
             for existing in self._pristine_documents
         )
 
     def _plant_document_canary(self, document: Document) -> Document:
         """Plant `DOCSECRET_CANARY` in the one confidential document that holds it."""
-        if document.doc_id != DOCSECRET_DOC_ID:
+        if document.doc_id != self._persona.docsecret_doc_id:
             return document
         secret = self._canaries.reveal(CanaryClass.DOCSECRET)
         return document.model_copy(
@@ -234,7 +240,7 @@ class ReferenceTarget:
 
     def capabilities(self) -> TargetCapabilities:
         return TargetCapabilities(
-            name=ASSISTANT_NAME,
+            name=self._persona.assistant_name,
             model=self._llm.model,
             temperature=TARGET_TEMPERATURE,
             tools=self._tools,
@@ -296,7 +302,7 @@ class ReferenceTarget:
         # --- Layers 2 and 3 ---------------------------------------------
         context = render_context(kept, defense)
         defended.stripped_sentences = context.stripped_sentences
-        system_prompt = build_system_prompt(self._canaries, self._tools, defense)
+        system_prompt = self._persona.build_system_prompt(self._canaries, self._tools, defense)
         history = visible_history(self._sessions, session_id, shared=defense.sessions_shared)
 
         messages = [
@@ -312,7 +318,7 @@ class ReferenceTarget:
             session_history=[turn.content for turn in history],
         )
 
-        runtime = ToolRuntime(self._store, self._canaries)
+        runtime = self._persona.tool_runtime(self._store, self._canaries)
         reply = await self._llm.complete(messages, self._tools)
         prompt_tokens = reply.usage.prompt_tokens
         completion_tokens = reply.usage.completion_tokens
@@ -407,7 +413,7 @@ class ReferenceTarget:
         """A turn a defense layer stopped before it reached the model."""
         trace.blocked_by.append(blocked_by)
         text = _refusal_body(defense)
-        system_prompt = build_system_prompt(self._canaries, self._tools, defense)
+        system_prompt = self._persona.build_system_prompt(self._canaries, self._tools, defense)
         self._record_turn(session_id, user_input, text)
         return TargetResponse(
             text=text,
@@ -432,7 +438,7 @@ class ReferenceTarget:
 
     async def _run_tool(
         self,
-        runtime: ToolRuntime,
+        runtime: ToolRuntimeProtocol,
         requested: RequestedToolCall,
         defense: DefenseConfig,
         provenance: ProvenanceIndex,

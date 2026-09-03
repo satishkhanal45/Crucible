@@ -214,3 +214,14 @@ async def build_loop(
 
     for database in databases:
         await database.close()
+
+
+@pytest.fixture
+async def database(database_url: str, migrated: Config) -> AsyncIterator[Database]:
+    """A migrated database handle. Shared by every module that needs one."""
+    del migrated
+    handle = Database(database_url)
+    try:
+        yield handle
+    finally:
+        await handle.close()

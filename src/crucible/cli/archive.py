@@ -17,26 +17,34 @@ from crucible.archive.service import ArchiveService
 from crucible.config import Settings, get_settings
 from crucible.db.session import Database
 from crucible.logging import configure_logging
+from crucible.repositories.agreement import ClassifierAgreementRepository
+from crucible.schemas.agreement import UNMEASURED_CAPTION, ClassifierAgreement
 from crucible.schemas.archive import ArchiveStats
 from crucible.services.embeddings import embedder_from_settings
 
 
-async def gather(settings: Settings) -> ArchiveStats:
+async def gather(settings: Settings) -> tuple[ArchiveStats, ClassifierAgreement | None]:
     database = Database(settings.DATABASE_URL)
     try:
         service = ArchiveService(database, embedder_from_settings(settings))
-        return await service.stats()
+        stats = await service.stats()
+        async with database.session() as session:
+            agreement = await ClassifierAgreementRepository(session).latest()
+        return stats, agreement
     finally:
         await database.close()
 
 
-def render(stats: ArchiveStats) -> str:
+def render(stats: ArchiveStats, agreement: ClassifierAgreement | None = None) -> str:
     lines = [
         "archive",
         f"  attacks          {stats.archive_size}",
         f"  holdout          {stats.holdout_count} ({stats.holdout_ratio:.1%})",
         f"  unclassified     {stats.unclassified_count} (occupy no cell)",
         f"  coverage         {stats.coverage}",
+        # No coverage figure is printed without the label agreement behind it:
+        # a cell count means nothing if the cells are wrong.
+        f"  label agreement  {agreement.caption() if agreement else UNMEASURED_CAPTION}",
         "",
         "novelty",
     ]
@@ -76,7 +84,8 @@ def render(stats: ArchiveStats) -> str:
 def main() -> int:
     settings = get_settings()
     configure_logging(settings.log_level_number)
-    print(render(asyncio.run(gather(settings))))
+    stats, agreement = asyncio.run(gather(settings))
+    print(render(stats, agreement))
     return 0
 
 

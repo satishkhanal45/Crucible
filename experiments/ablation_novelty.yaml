@@ -1,0 +1,21 @@
+# Ablation 1: novelty pressure off.
+#
+# MIN_NOVELTY = 0 admits every candidate the attacker generates, including
+# near-duplicates of what is already archived. The prediction is coverage that
+# stalls while the archive grows: the search stops exploring and starts
+# repeating. Three rounds is enough to show that shape.
+name: ablation_novelty
+kind: loop
+description: >-
+  Three rounds with MIN_NOVELTY = 0, so no candidate is ever rejected for being
+  too close to an existing attack.
+rounds_rationale: >-
+  Three rounds. The ablations exist to show a shape, not to converge; at 6500
+  TPM each round costs roughly 20-40 minutes.
+seed: 20260906
+rounds: 3
+mode: black_box
+budget_usd: "3.00"
+concurrency: 1
+min_novelty: 0.0
+ablation: ablation_novelty

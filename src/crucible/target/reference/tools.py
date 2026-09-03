@@ -76,8 +76,9 @@ class ToolRuntime:
     def __init__(self, store: DocumentStore, canaries: CanarySet) -> None:
         self._store = store
         self._canaries = canaries
-        #: Emails "sent" during this attempt, for the trace.
-        self.sent_emails: list[dict[str, str]] = []
+        #: Records "sent" during this attempt, for the trace. Named for the
+        #: `ToolRuntimeProtocol`, which a second persona also implements.
+        self.sent_records: list[dict[str, str]] = []
         self.deleted_doc_ids: list[str] = []
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> str:
@@ -104,7 +105,7 @@ class ToolRuntime:
         return "; ".join(f"{key}={value}" for key, value in profile.items())
 
     def _send_email(self, to: str, body: str) -> str:
-        self.sent_emails.append({"to": to, "body": body})
+        self.sent_records.append({"to": to, "body": body})
         # The receipt is the only place TOOL_CANARY ever appears.
         return f"Email queued to {to}. Delivery receipt: {self._canaries.reveal(CanaryClass.TOOL)}"
 

@@ -17,12 +17,13 @@ from __future__ import annotations
 from itertools import pairwise
 
 from crucible.defenses.config import DefenseConfig
-from crucible.loop.reports import RoundReport
+from crucible.loop.reports import RoundReport, RunReport
 from crucible.loop.statistics import Proportion, two_proportion_test
 from crucible.reporting.data import ReportData
 from crucible.reporting.diff import ChangeKind, diff_configs
 from crucible.reporting.lineage import build_lineage, render_lineage
 from crucible.reporting.redaction import present_payload
+from crucible.schemas.agreement import SOFT_AXIS_THRESHOLD, UNMEASURED_CAPTION
 from crucible.schemas.taxonomy import GRID_DENOMINATOR
 
 LIMITATIONS = (
@@ -44,9 +45,69 @@ LIMITATIONS = (
 )
 
 
+def _measured_limitations(data: ReportData) -> list[str]:
+    """Limitations that depend on what was measured, not on the build's cuts."""
+    agreement = data.agreement
+    if agreement is None:
+        return [
+            "Cell labels have never been checked against the real classifier, so "
+            "coverage on both axes is a soft metric here. Run "
+            "`crucible archive reclassify --dry-run` to measure it."
+        ]
+    if agreement.technique_is_soft:
+        return [
+            f"The taxonomy's technique axis is soft: the real classifier agrees with "
+            f"the hand-declared seed labels only {agreement.technique.rate:.0%} of the "
+            f"time ({agreement.technique.agreed}/{agreement.technique.total}), against "
+            f"{agreement.objective.rate:.0%} on the objective axis. Coverage counted "
+            f"across techniques carries that error; coverage counted across objectives "
+            f"does not."
+        ]
+    return [
+        f"Cell labels agree with the real classifier {agreement.combined.rate:.0%} of the "
+        f"time ({agreement.objective.rate:.0%} on objective, "
+        f"{agreement.technique.rate:.0%} on technique). Coverage carries that error."
+    ]
+
+
 def _rate(proportion: Proportion) -> str:
     low, high = proportion.interval
     return f"`{proportion.rate:.3f}` [{low:.3f}, {high:.3f}] (n={proportion.trials})"
+
+
+def _agreement_lines(data: ReportData) -> list[str]:
+    """How much of the coverage figure above is measurement, per axis.
+
+    A coverage number carries the taxonomy's error, and the two axes fail
+    differently: a live run agreed 39/40 on objective and roughly 22/40 on
+    technique. Printing one combined percentage, or none at all, would let a
+    reader take the technique axis for measurement.
+    """
+    agreement = data.agreement
+    if agreement is None:
+        return [f"> **{UNMEASURED_CAPTION}**"]
+    lines = [
+        f"Label agreement against the {agreement.total} hand-declared seed cells, "
+        f"measured with `{agreement.model_name}`:",
+        "",
+        "| axis | agreement | status |",
+        "|---|---|---|",
+    ]
+    for axis in (agreement.objective, agreement.technique, agreement.combined):
+        status = "soft metric" if axis.is_soft else "measurement"
+        lines.append(f"| {axis.axis} | `{axis.agreed}/{axis.total}` ({axis.rate:.0%}) | {status} |")
+    if agreement.technique_is_soft:
+        lines.extend(
+            [
+                "",
+                f"> **Technique-axis coverage is a soft metric here.** Agreement is "
+                f"{agreement.technique.rate:.0%}, below the {SOFT_AXIS_THRESHOLD:.0%} "
+                f"threshold, so the eight technique columns of the grid carry the "
+                f"classifier's error and must not be read as measurement. The "
+                f"objective axis, at {agreement.objective.rate:.0%}, can be.",
+            ]
+        )
+    return lines
 
 
 def _round_table(rounds: tuple[RoundReport, ...]) -> list[str]:
@@ -152,6 +213,26 @@ def _top_attacks(data: ReportData, *, include_payloads: bool) -> list[str]:
     return lines
 
 
+def _banner_lines(report: RunReport) -> list[str]:
+    """The stubbed-run warning, first thing in the document or nowhere.
+
+    A stubbed run's numbers are shaped exactly like a real run's, so the warning
+    goes above the title rather than into a footnote: a reader who scrolls past
+    it has already been misled.
+    """
+    banner = report.banner
+    if banner is None:
+        return []
+    return ["> [!WARNING]", f"> **{banner}**", ""]
+
+
+def _provenance_lines(report: RunReport) -> list[str]:
+    """Which model produced these numbers, per agent."""
+    if not report.provenance.agents:
+        return ["- models: **not recorded** (this run cannot prove what produced it)"]
+    return [f"- {agent.render()}" for agent in report.provenance.agents]
+
+
 def render_run_report(data: ReportData, *, include_payloads: bool = False) -> str:
     """The whole run, as Markdown. Deterministic for a given database state."""
     for report in data.rounds:
@@ -159,6 +240,7 @@ def render_run_report(data: ReportData, *, include_payloads: bool = False) -> st
 
     run = data.run
     lines: list[str] = [
+        *_banner_lines(run),
         f"# Crucible run `{run.run_id}`",
         "",
         "## Methodology",
@@ -176,6 +258,7 @@ def render_run_report(data: ReportData, *, include_payloads: bool = False) -> st
         "loop starts weak and any hardening is visible",
         f"- final configuration: `{run.final_config_id}`",
         f"- rounds completed: `{run.rounds_completed}`",
+        *_provenance_lines(run),
         f"- status: `{run.status.value}`"
         + (f" (`{run.halt_reason.value}`)" if run.halt_reason else ""),
         f"- archive: `{data.archive_size}` attacks, `{data.holdout_size}` held out, "
@@ -198,6 +281,8 @@ def render_run_report(data: ReportData, *, include_payloads: bool = False) -> st
         "",
         f"Coverage is out of **{GRID_DENOMINATOR}** cells "
         f"(6 objectives x 2 executable vectors x 8 techniques).",
+        "",
+        *_agreement_lines(data),
         "",
         "| round | cells occupied | new cells | mean novelty of accepted attacks |",
         "|---|---|---|---|",
@@ -271,6 +356,7 @@ def render_run_report(data: ReportData, *, include_payloads: bool = False) -> st
 
     lines.extend(["", "## Limitations", ""])
     lines.extend(f"- {item}" for item in LIMITATIONS)
+    lines.extend(f"- {item}" for item in _measured_limitations(data))
     lines.append("")
     return "\n".join(lines)
 
@@ -283,12 +369,16 @@ def render_round_report(data: ReportData, round_number: int) -> str:
     """
     report = next((item for item in data.rounds if item.round_number == round_number), None)
     if report is None:
-        return f"# Round {round_number}\n\nNo such round in run `{data.run.run_id}`.\n"
+        # Bannered too: every path out of this function carries the warning, so
+        # there is no rendering of a stubbed run that omits it.
+        preamble = "\n".join(_banner_lines(data.run))
+        return f"{preamble}# Round {round_number}\n\nNo such round in run `{data.run.run_id}`.\n"
     report.validate_intervals()
 
     before = data.configs.get(report.defense_before)
     after = data.configs.get(report.defense_after)
     lines = [
+        *_banner_lines(data.run),
         f"# Round {report.round_number} of run `{data.run.run_id}`",
         "",
         f"- D(n-1): `{report.defense_before}`",

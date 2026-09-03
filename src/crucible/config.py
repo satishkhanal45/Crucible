@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # free-tier-safe values, concurrency 1 with a small delay.
     PROVIDER_MAX_CONCURRENCY: int = Field(ge=1, le=16)
     PROVIDER_MIN_INTERVAL_SECONDS: float = Field(ge=0.0, le=60.0)
+    # The limit that actually bites on Groq's free tier is tokens per minute,
+    # not requests: 8000 TPM, which one long prompt and its reply can consume
+    # several times over inside a quiet minute. Ship a margin below the real
+    # ceiling, because the estimate that books the window is approximate.
+    PROVIDER_TOKENS_PER_MINUTE: int = Field(ge=0, le=10_000_000)
+    PROVIDER_REQUESTS_PER_MINUTE: int = Field(ge=0, le=10_000)
 
     # `provider:model=prompt/completion` entries, comma separated. Merged over
     # DEFAULT_MODEL_PRICING, so it only needs the rates that have changed.

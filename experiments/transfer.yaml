@@ -1,0 +1,25 @@
+# Does an archive evolved against one application carry to another?
+#
+# The final archive, unchanged, against a SECOND TargetAdapter: a different
+# system prompt, a different corpus domain, and a different tool set. The loop
+# is not modified — the adapter Protocol from Phase 1 is what makes this
+# possible, and `tests/integration/test_transfer.py` asserts that no loop code
+# changed.
+#
+# The second target shares Crucible's retrieval and defense-layer machinery, so
+# the result is WITHIN-FAMILY transfer, which is a weaker claim than transfer to
+# an independently built application. Findings must say so.
+name: transfer
+kind: transfer
+description: >-
+  Replay the final non-holdout archive against the Meridian Clinic target under
+  both D(0) and the final config, and report the block rates side by side.
+rounds_rationale: >-
+  Not a loop: two full-archive evaluations against the second target.
+seed: 20260906
+rounds: 1
+budget_usd: "4.00"
+concurrency: 1
+persona: meridian
+source_run_id: null
+ablation: none
