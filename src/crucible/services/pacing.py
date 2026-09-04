@@ -8,12 +8,17 @@ by request count alone therefore stays under the request limit while sailing
 straight through the token limit, which is what ended a live 40-call reclassify
 run 23 calls in.
 
-So the pacer keeps a rolling one-minute window **per model**, of both requests
-and tokens. A call reserves an estimate before it is sent and reconciles the
-reservation against the provider's reported usage after, so the window tracks
-what was really spent rather than what we guessed. Backoff in
+So the pacer keeps a rolling one-minute window per **provider and model**, of
+both requests and tokens. A call reserves an estimate before it is sent and
+reconciles the reservation against the provider's reported usage after, so the
+window tracks what was really spent rather than what we guessed. Backoff in
 `crucible.services.retry` still handles the 429 that slips through; this exists
 to make that the exception rather than the plan.
+
+The key is `provider:model`, and the limits are looked up by the provider half
+of it. Two providers are two separate pools — that is the reason for running on
+two — so `groq:X` and `deepseek:X` must never share a window, and a window sized
+for one provider's published limit must not be applied to the other's.
 
 The pacer is owned by `CostMeter`, because "every LLM call routes through
 `CostMeter`" is already a project invariant and that makes this one too.
@@ -23,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
@@ -148,6 +153,7 @@ class ProviderPacer:
         max_concurrency: int = 1,
         tokens_per_minute: int = 0,
         requests_per_minute: int = 0,
+        limits: Mapping[str, tuple[int, int]] | None = None,
         sleep: SleepFn = asyncio.sleep,
         clock: ClockFn = time.monotonic,
     ) -> None:
@@ -161,6 +167,9 @@ class ProviderPacer:
         self._max_concurrency = max_concurrency
         self._tokens_per_minute = tokens_per_minute
         self._requests_per_minute = requests_per_minute
+        #: Per-provider overrides of the pair above, keyed by provider name.
+        #: Two providers publish different limits and never share a pool.
+        self._limits = dict(limits or {})
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._gate = asyncio.Lock()
         self._sleep = sleep
@@ -183,12 +192,14 @@ class ProviderPacer:
         *,
         tokens_per_minute: int = 0,
         requests_per_minute: int = 0,
+        limits: Mapping[str, tuple[int, int]] | None = None,
     ) -> ProviderPacer:
         return cls(
             min_interval_seconds=min_interval_seconds,
             max_concurrency=max_concurrency,
             tokens_per_minute=tokens_per_minute,
             requests_per_minute=requests_per_minute,
+            limits=limits,
         )
 
     @property
@@ -209,19 +220,51 @@ class ProviderPacer:
 
     @property
     def limits_tokens(self) -> bool:
-        return self._tokens_per_minute > 0 and self._requests_per_minute > 0
+        """True when any configured provider has a window at all."""
+        return any(
+            tokens > 0 and requests > 0
+            for tokens, requests in (
+                (self._tokens_per_minute, self._requests_per_minute),
+                *self._limits.values(),
+            )
+        )
+
+    def limits_key(self, key: str) -> bool:
+        """True when this `provider:model` key is windowed.
+
+        Decided per key, not globally: one provider having a limit configured
+        must not impose a zero-sized window on another that has none.
+        """
+        tokens, requests = self.limits_for(key)
+        return tokens > 0 and requests > 0
+
+    def limits_for(self, key: str) -> tuple[int, int]:
+        """`(tokens_per_minute, requests_per_minute)` for one `provider:model`.
+
+        The provider half of the key selects the limits; a provider with no
+        entry falls back to the configured pair.
+        """
+        provider, separator, _ = key.partition(":")
+        if separator:
+            override = self._limits.get(provider.strip().lower())
+            if override is not None:
+                return override
+        return (self._tokens_per_minute, self._requests_per_minute)
 
     def window_for(self, model: str) -> ModelWindow:
-        """The rolling window for one model, created on first use.
+        """The rolling window for one `provider:model` key, made on first use.
 
-        Limits are per model, so a cheap classifier model and an expensive
-        attacker model do not consume one another's budget.
+        Windows are per provider AND per model: a cheap classifier model and an
+        expensive attacker model do not consume one another's budget, and two
+        providers do not consume one another's at all, since the whole reason
+        for a second provider is that it is a second pool.
         """
         window = self._windows.get(model)
         if window is None:
+            tokens_per_minute, requests_per_minute = self.limits_for(model)
             window = ModelWindow(
-                tokens_per_minute=self._tokens_per_minute,
-                requests_per_minute=self._requests_per_minute,
+                tokens_per_minute=tokens_per_minute,
+                requests_per_minute=requests_per_minute,
             )
             self._windows[model] = window
         return window
@@ -243,7 +286,7 @@ class ProviderPacer:
 
     async def _reserve(self, model: str, tokens: int) -> _Entry | None:
         """Book `tokens` against this model's window, waiting until they fit."""
-        if not self.limits_tokens:
+        if not self.limits_key(model):
             return None
         while True:
             async with self._gate:

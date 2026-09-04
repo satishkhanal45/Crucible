@@ -9,10 +9,11 @@ from typing import Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from crucible.config import LLMProvider
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
 from crucible.services.pacing import estimate_tokens
-from crucible.target.reference.llm import GroqTargetLLM, LLMMessage
+from crucible.target.reference.llm import ChatCompletionsLLM, LLMMessage
 
 
 class AttackerReply(BaseModel):
@@ -62,11 +63,18 @@ class ScriptedAttackerLLM:
         )
 
 
-class GroqAttackerLLM:
-    """Groq chat completions, reusing the target's client."""
+class ChatAttackerLLM:
+    """Live chat completions, reusing the one OpenAI-shaped client.
 
-    def __init__(self, api_key: str, client: httpx.AsyncClient, *, model: str) -> None:
-        self._inner = GroqTargetLLM(api_key, client, model=model)
+    `provider` is explicit because the attacker may run on a different provider
+    from the target: spreading the four agents across two hosts is the point of
+    having two, and each has its own rate-limit pool and its own credential.
+    """
+
+    def __init__(
+        self, api_key: str, client: httpx.AsyncClient, *, model: str, provider: LLMProvider
+    ) -> None:
+        self._inner = ChatCompletionsLLM(api_key, client, model=model, provider=provider)
 
     @property
     def provider(self) -> str:

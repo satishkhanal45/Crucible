@@ -47,6 +47,14 @@ Additional reductions, stated in findings as limitations, not hidden:
 - Benign task set is **40 tasks including 12 hard negatives** (spec ideal: 60/15).
 - Main run is **8–10 rounds** (spec ideal: 15). Intervals will be wide; report them.
 - Taxonomy hand-check is **30 samples** (spec ideal: 50).
+- **Model providers are configured per agent, across two providers.** Target,
+  attacker, defender and classifier each name their own provider — `groq` or
+  `deepseek` — and their own model, because a free tier's binding limit is a
+  per-model token pool and a second host is a second pool. The standing "one
+  model provider" limitation in `docs/findings.md` is therefore weakened only as
+  far as a given run's **recorded provenance** shows: a run that placed all four
+  agents on one provider is exactly as dependent on that family as before. The
+  run row, not this sentence, is the authority on which agent ran where.
 
 ## 4. Deferred register (restore instructions)
 

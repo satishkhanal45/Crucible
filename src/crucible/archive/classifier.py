@@ -21,6 +21,7 @@ from typing import Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from crucible.config import LLMProvider
 from crucible.logging import get_logger
 from crucible.schemas.spend import TokenUsage
 from crucible.schemas.taxonomy import Objective, Technique
@@ -222,17 +223,20 @@ class ScriptedClassifierClient:
         )
 
 
-class GroqClassifierClient:
-    """The real classifier, on Groq's chat completions API.
+class ChatClassifierClient:
+    """The real classifier, on a provider's chat completions API.
 
-    It reuses the target's Groq client rather than duplicating the HTTP call;
-    only the message shape differs. Every call is metered by `TaxonomyClassifier`.
+    It reuses the one OpenAI-shaped client rather than duplicating the HTTP
+    call; only the message shape differs. Every call is metered by
+    `TaxonomyClassifier`.
     """
 
-    def __init__(self, api_key: str, client: httpx.AsyncClient, *, model: str) -> None:
-        from crucible.target.reference.llm import GroqTargetLLM
+    def __init__(
+        self, api_key: str, client: httpx.AsyncClient, *, model: str, provider: LLMProvider
+    ) -> None:
+        from crucible.target.reference.llm import ChatCompletionsLLM
 
-        self._inner = GroqTargetLLM(api_key, client, model=model)
+        self._inner = ChatCompletionsLLM(api_key, client, model=model, provider=provider)
 
     @property
     def provider(self) -> str:

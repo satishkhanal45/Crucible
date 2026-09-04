@@ -10,8 +10,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -23,6 +25,56 @@ logger = get_logger(__name__)
 Environment = Literal["dev", "test", "prod"]
 
 _LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
+
+
+class LLMProvider(StrEnum):
+    """A provider an agent can be pointed at.
+
+    Two providers exist because free-tier rate limits are the binding constraint
+    on this project: Groq gives one token-per-minute pool per model that all
+    four agents contend for, and a second host is a second pool. Which agent
+    runs where is chosen per agent, in settings, never globally.
+    """
+
+    GROQ = "groq"
+    DEEPSEEK = "deepseek"
+
+
+#: The four agents whose provider and model are configured independently.
+AGENT_ROLES: tuple[str, ...] = ("target", "attacker", "defender", "classifier")
+
+# --------------------------------------------------------------------------- #
+# Provider endpoints
+# --------------------------------------------------------------------------- #
+# Both providers speak the OpenAI chat-completions shape, which is why one
+# client serves both: `ChatCompletionsLLM` is parameterised by the base URL
+# below, so there is exactly one place where a provider's HTTP status maps to
+# our typed errors. A base URL is configuration, like a model id, and belongs
+# here rather than in a module that calls it.
+#
+# Checked on 2026-09-04. DeepSeek documents the OpenAI-compatible endpoint at
+# https://api-docs.deepseek.com; Groq's is https://console.groq.com/docs.
+PROVIDER_BASE_URLS: Mapping[str, str] = {
+    LLMProvider.GROQ.value: "https://api.groq.com/openai/v1",
+    LLMProvider.DEEPSEEK.value: "https://api.deepseek.com/v1",
+}
+
+#: The Tier 3 judge's host. The judge is not built in this cut (B4), but the
+#: egress guard still has to know the host the setting names.
+JUDGE_HOST = "generativelanguage.googleapis.com"
+
+
+def provider_hosts() -> tuple[str, ...]:
+    """Every host the process may reach to call a model.
+
+    These are **provider** hosts, kept deliberately separate from
+    `TARGET_ALLOWLIST`, which is the list of attack targets. A provider is not
+    a target and must never be reachable as one.
+    """
+    hosts = [urlsplit(url).hostname or "" for url in PROVIDER_BASE_URLS.values()]
+    hosts.append(JUDGE_HOST)
+    return tuple(dict.fromkeys(host for host in hosts if host))
+
 
 # --------------------------------------------------------------------------- #
 # Model pricing
@@ -45,6 +97,14 @@ DEFAULT_MODEL_PRICING: Mapping[str, tuple[str, str]] = {
     "gemini:gemini-2.0-flash": ("0.10", "0.40"),
     "gemini:gemini-2.0-flash-lite": ("0.075", "0.30"),
     "gemini:gemini-1.5-flash": ("0.075", "0.30"),
+    # DeepSeek, added 2026-09-04 with the second provider. Standard-price,
+    # cache-miss input, transcribed from https://api-docs.deepseek.com/quick_start/pricing.
+    # DeepSeek also publishes a cache-hit rate and an off-peak discount, neither
+    # of which this table models, so a recorded cost is an upper bound. A stale
+    # rate under-reports spend; it does not disable the budget the way a missing
+    # entry does. Override with MODEL_PRICING rather than editing this table.
+    "deepseek:deepseek-chat": ("0.27", "1.10"),
+    "deepseek:deepseek-reasoner": ("0.55", "2.19"),
 }
 
 
@@ -71,6 +131,7 @@ class Settings(BaseSettings):
     ENV: Environment
     LOG_LEVEL: str
     GROQ_API_KEY: str
+    DEEPSEEK_API_KEY: str
     GEMINI_API_KEY: str
     # Comma-separated in the environment; a list everywhere else. NoDecode stops
     # pydantic-settings from trying to read the raw value as JSON.
@@ -81,11 +142,24 @@ class Settings(BaseSettings):
     # Model ids. Every one is read from here, never from a CLI default: an id
     # hardcoded in a typer option makes editing `.env` a no-op, which is how a
     # decommissioned model survived a configuration change.
-    LLM_PROVIDER: str
+    #
+    # Provider is chosen **per agent**, paired with that agent's model. There is
+    # deliberately no global provider setting: the point of the second provider
+    # is that the four agents can be spread across two rate-limit pools, which a
+    # single `LLM_PROVIDER` could not express. (That setting was replaced by
+    # these four; `.env.example` records the change.)
+    TARGET_PROVIDER: LLMProvider
     TARGET_MODEL: str
+    ATTACKER_PROVIDER: LLMProvider
     ATTACKER_MODEL: str
+    DEFENDER_PROVIDER: LLMProvider
     DEFENDER_MODEL: str
+    CLASSIFIER_PROVIDER: LLMProvider
     CLASSIFIER_MODEL: str
+    # The Tier 3 judge is a separate concern on a separate host, and is not one
+    # of the four agents: it is not built in this cut (B4) and its provider is
+    # not an `LLMProvider`. It stays a plain string so that naming a judge host
+    # cannot be mistaken for pointing an agent at one.
     JUDGE_PROVIDER: str
     DEFAULT_JUDGE_MODEL: str
 
@@ -100,6 +174,10 @@ class Settings(BaseSettings):
     # ceiling, because the estimate that books the window is approximate.
     PROVIDER_TOKENS_PER_MINUTE: int = Field(ge=0, le=10_000_000)
     PROVIDER_REQUESTS_PER_MINUTE: int = Field(ge=0, le=10_000)
+    # Per-provider overrides, `provider=tokens/requests` comma separated. Two
+    # providers do not share a rate limit and rarely publish the same one, so
+    # the pair above is only the default for a provider with no entry here.
+    PROVIDER_RATE_LIMITS: Annotated[dict[str, tuple[int, int]], NoDecode] = {}
 
     # `provider:model=prompt/completion` entries, comma separated. Merged over
     # DEFAULT_MODEL_PRICING, so it only needs the rates that have changed.
@@ -129,6 +207,35 @@ class Settings(BaseSettings):
                 parsed[key.strip().lower()] = (Decimal(prompt.strip()), Decimal(completion.strip()))
             except InvalidOperation as error:
                 raise ValueError(f"MODEL_PRICING entry {entry!r} has a non-numeric rate") from error
+        return parsed
+
+    @field_validator("PROVIDER_RATE_LIMITS", mode="before")
+    @classmethod
+    def _parse_rate_limits(cls, value: object) -> dict[str, tuple[int, int]]:
+        if isinstance(value, dict):
+            return {
+                str(key).strip().lower(): (int(limits[0]), int(limits[1]))
+                for key, limits in value.items()
+            }
+        if not isinstance(value, str):
+            raise ValueError("PROVIDER_RATE_LIMITS must be a comma-separated string or a mapping")
+        parsed: dict[str, tuple[int, int]] = {}
+        for entry in (item.strip() for item in value.split(",")):
+            if not entry:
+                continue
+            provider, separator, limits = entry.partition("=")
+            if not separator or "/" not in limits:
+                raise ValueError(
+                    f"PROVIDER_RATE_LIMITS entry {entry!r} must read "
+                    f"provider=tokens_per_minute/requests_per_minute"
+                )
+            tokens, _, requests = limits.partition("/")
+            try:
+                parsed[provider.strip().lower()] = (int(tokens.strip()), int(requests.strip()))
+            except ValueError as error:
+                raise ValueError(
+                    f"PROVIDER_RATE_LIMITS entry {entry!r} has a non-integer limit"
+                ) from error
         return parsed
 
     @field_validator("TARGET_ALLOWLIST", mode="before")
@@ -172,15 +279,65 @@ class Settings(BaseSettings):
         return merged
 
     @property
+    def agents(self) -> tuple[tuple[str, LLMProvider, str], ...]:
+        """`(role, provider, model)` for each agent, in a fixed order.
+
+        One place resolves the pairing, so nothing else has to know that
+        `ATTACKER_PROVIDER` goes with `ATTACKER_MODEL` and not with another.
+        """
+        return (
+            ("target", self.TARGET_PROVIDER, self.TARGET_MODEL),
+            ("attacker", self.ATTACKER_PROVIDER, self.ATTACKER_MODEL),
+            ("defender", self.DEFENDER_PROVIDER, self.DEFENDER_MODEL),
+            ("classifier", self.CLASSIFIER_PROVIDER, self.CLASSIFIER_MODEL),
+        )
+
+    def provider_for(self, role: str) -> LLMProvider:
+        """The provider configured for one agent role."""
+        for name, provider, _ in self.agents:
+            if name == role:
+                return provider
+        raise KeyError(f"{role!r} is not an agent role: expected one of {AGENT_ROLES}")
+
+    def model_for(self, role: str) -> str:
+        """The model configured for one agent role."""
+        for name, _, model in self.agents:
+            if name == role:
+                return model
+        raise KeyError(f"{role!r} is not an agent role: expected one of {AGENT_ROLES}")
+
+    def api_key_for(self, provider: LLMProvider) -> str:
+        """The credential for one provider. Each has its own; they never share."""
+        keys = {
+            LLMProvider.GROQ: self.GROQ_API_KEY,
+            LLMProvider.DEEPSEEK: self.DEEPSEEK_API_KEY,
+        }
+        return keys[provider]
+
+    def base_url_for(self, provider: LLMProvider) -> str:
+        return PROVIDER_BASE_URLS[provider.value]
+
+    def rate_limits_for(self, provider: LLMProvider | str) -> tuple[int, int]:
+        """`(tokens_per_minute, requests_per_minute)` for one provider.
+
+        The global pair is the default; `PROVIDER_RATE_LIMITS` overrides it per
+        provider, because the two hosts publish different limits and a window
+        sized for one would either throttle or overrun the other.
+        """
+        name = str(provider).strip().lower()
+        return self.PROVIDER_RATE_LIMITS.get(
+            name, (self.PROVIDER_TOKENS_PER_MINUTE, self.PROVIDER_REQUESTS_PER_MINUTE)
+        )
+
+    @property
+    def provider_rate_limits(self) -> dict[str, tuple[int, int]]:
+        """Every configured provider's limits, resolved. Passed to the pacer."""
+        return {provider.value: self.rate_limits_for(provider) for provider in LLMProvider}
+
+    @property
     def configured_models(self) -> tuple[str, ...]:
         """Every `provider:model` this process can actually call, in order."""
-        agents = (
-            self.TARGET_MODEL,
-            self.ATTACKER_MODEL,
-            self.DEFENDER_MODEL,
-            self.CLASSIFIER_MODEL,
-        )
-        keys = [price_key(self.LLM_PROVIDER, model) for model in agents]
+        keys = [price_key(provider.value, model) for _, provider, model in self.agents]
         keys.append(price_key(self.JUDGE_PROVIDER, self.DEFAULT_JUDGE_MODEL))
         seen: dict[str, None] = {}
         for key in keys:

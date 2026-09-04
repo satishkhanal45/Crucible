@@ -49,6 +49,7 @@ from crucible.experiments.runner import (
     ExperimentContext,
     ProviderMismatch,
     cost_estimate_minutes,
+    pacing_settings,
     record_result,
     run_layer_ablation,
     run_loop_experiment,
@@ -233,17 +234,21 @@ def _announce_provider(settings: Settings, provider: Provider) -> None:
             "banner, and `crucible findings regenerate` will refuse its numbers.[/yellow]"
         )
         return
-    table = Table(title=f"provider: {provider.value} (live)")
+    table = Table(title="live providers, per agent")
     table.add_column("agent")
+    table.add_column("provider")
     table.add_column("model")
-    for role, model in (
-        ("target", settings.TARGET_MODEL),
-        ("attacker", settings.ATTACKER_MODEL),
-        ("defender", settings.DEFENDER_MODEL),
-        ("classifier", settings.CLASSIFIER_MODEL),
-    ):
-        table.add_row(role, model)
+    table.add_column("tokens/min")
+    for role, agent_provider, model in settings.agents:
+        tokens_per_minute, _ = settings.rate_limits_for(agent_provider)
+        table.add_row(role, agent_provider.value, model, str(tokens_per_minute))
     console.print(table)
+    pools = {agent_provider for _, agent_provider, _ in settings.agents}
+    if len(pools) > 1:
+        console.print(
+            f"[cyan]{len(pools)} providers in this run: each has its own rate-limit pool "
+            f"and its own recorded provenance.[/cyan]"
+        )
     unpriced = settings.unpriced_models()
     if unpriced:
         console.print(
@@ -305,7 +310,13 @@ def loop_start(
     seed_value: Annotated[int, typer.Option("--seed", help="Run seed.")] = 20260906,
     provider: Annotated[
         Provider,
-        typer.Option("--provider", help="groq (live) or scripted (test doubles, marked stubbed)."),
+        typer.Option(
+            "--provider",
+            help=(
+                "groq (live: each agent on the provider its settings name) or "
+                "scripted (test doubles, marked stubbed)."
+            ),
+        ),
     ] = Provider.GROQ,
 ) -> None:
     """Start a run. D(0) is always the empty config, so the loop starts weak."""
@@ -316,10 +327,7 @@ def loop_start(
         mode=AttackerMode(mode),
         budget_usd=Decimal(str(budget)),
         seed=seed_value,
-        provider_max_concurrency=settings.PROVIDER_MAX_CONCURRENCY,
-        provider_min_interval_seconds=settings.PROVIDER_MIN_INTERVAL_SECONDS,
-        provider_tokens_per_minute=settings.PROVIDER_TOKENS_PER_MINUTE,
-        provider_requests_per_minute=settings.PROVIDER_REQUESTS_PER_MINUTE,
+        **pacing_settings(settings),
     )
     report = asyncio.run(_start(settings, loop_settings, provider))
     _print_run(report)
@@ -348,7 +356,13 @@ def loop_resume(
     run_id: Annotated[str, typer.Option("--run-id", help="The run to continue.")],
     provider: Annotated[
         Provider,
-        typer.Option("--provider", help="groq (live) or scripted (test doubles, marked stubbed)."),
+        typer.Option(
+            "--provider",
+            help=(
+                "groq (live: each agent on the provider its settings name) or "
+                "scripted (test doubles, marked stubbed)."
+            ),
+        ),
     ] = Provider.GROQ,
 ) -> None:
     """Continue a checkpointed run from where it stopped."""
@@ -473,7 +487,13 @@ def eval_defense(
     which: Annotated[EvalSet, typer.Option("--set")] = EvalSet.ARCHIVE,
     provider: Annotated[
         Provider,
-        typer.Option("--provider", help="groq (live) or scripted (test doubles)."),
+        typer.Option(
+            "--provider",
+            help=(
+                "groq (live: each agent on the provider its settings name) or "
+                "scripted (test doubles)."
+            ),
+        ),
     ] = Provider.GROQ,
 ) -> None:
     """Evaluate one stored config against the archive, the holdout set, or utility."""
@@ -722,7 +742,13 @@ def experiment_run(
     ] = None,
     provider: Annotated[
         Provider,
-        typer.Option("--provider", help="groq (live) or scripted (test doubles, marked stubbed)."),
+        typer.Option(
+            "--provider",
+            help=(
+                "groq (live: each agent on the provider its settings name) or "
+                "scripted (test doubles, marked stubbed)."
+            ),
+        ),
     ] = Provider.GROQ,
     rounds: Annotated[
         int | None, typer.Option("--rounds", help="Override the config's round count.")
@@ -777,6 +803,7 @@ async def _run_experiment(
             factories=_factories(settings, provider, stack),
             allowlist=tuple(settings.TARGET_ALLOWLIST),
             checkpointer_settings=settings if experiment.kind is ExperimentKind.LOOP else None,
+            pacing=pacing_settings(settings),
         )
 
         if experiment.kind is ExperimentKind.LOOP:

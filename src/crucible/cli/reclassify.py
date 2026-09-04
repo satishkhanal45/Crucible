@@ -19,7 +19,7 @@ import httpx
 from rich.console import Console
 from rich.table import Table
 
-from crucible.archive.classifier import GroqClassifierClient, TaxonomyClassifier
+from crucible.archive.classifier import ChatClassifierClient, TaxonomyClassifier
 from crucible.archive.seeds import load_seed_attacks
 from crucible.config import Settings
 from crucible.db.session import Database
@@ -54,7 +54,7 @@ async def reclassify(
     technique_agreed = 0
     combined_agreed = 0
     unclassified = 0
-    table = Table(title=f"seed classification ({model})")
+    table = Table(title=f"seed classification ({settings.CLASSIFIER_PROVIDER.value}/{model})")
     for column in ("seed", "declared", "predicted", "objective", "technique"):
         table.add_column(column)
 
@@ -68,10 +68,15 @@ async def reclassify(
                 settings.PROVIDER_MAX_CONCURRENCY,
                 tokens_per_minute=settings.PROVIDER_TOKENS_PER_MINUTE,
                 requests_per_minute=settings.PROVIDER_REQUESTS_PER_MINUTE,
+                limits=settings.provider_rate_limits,
             ),
         )
+        provider = settings.CLASSIFIER_PROVIDER
         classifier = TaxonomyClassifier(
-            GroqClassifierClient(settings.GROQ_API_KEY, client, model=model), meter
+            ChatClassifierClient(
+                settings.api_key_for(provider), client, model=model, provider=provider
+            ),
+            meter,
         )
         for attack in seeds:
             result = await classifier.classify(attack.payload)

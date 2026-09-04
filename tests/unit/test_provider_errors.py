@@ -15,6 +15,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
+from crucible.config import LLMProvider
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import BudgetExceeded, CostMeter, MeteredResult
 from crucible.services.retry import (
@@ -27,7 +28,7 @@ from crucible.services.retry import (
     parse_retry_after,
     retry_async,
 )
-from crucible.target.reference.llm import GroqTargetLLM, LLMMessage
+from crucible.target.reference.llm import ChatCompletionsLLM, LLMMessage
 from crucible.target.reference.tools import TOOL_SPECS
 from tests.fixtures.fake_spend import FakeSpendRepository
 
@@ -53,7 +54,9 @@ def _messages() -> list[LLMMessage]:
 
 async def _complete(handler: Callable[[httpx.Request], httpx.Response]) -> object:
     async with _client(handler) as client:
-        return await GroqTargetLLM("key", client, model=MODEL).complete(_messages(), TOOL_SPECS)
+        return await ChatCompletionsLLM(
+            "key", client, model=MODEL, provider=LLMProvider.GROQ
+        ).complete(_messages(), TOOL_SPECS)
 
 
 def _responder(*responses: httpx.Response) -> Callable[[httpx.Request], httpx.Response]:
@@ -83,7 +86,7 @@ async def _retried(
         recorded.append(seconds)
 
     async with _client(handler) as client:
-        llm = GroqTargetLLM("key", client, model=MODEL)
+        llm = ChatCompletionsLLM("key", client, model=MODEL, provider=LLMProvider.GROQ)
 
         async def call() -> object:
             return await llm.complete(_messages(), TOOL_SPECS)

@@ -116,6 +116,11 @@ work committed.
   `crucible eval defense <id>` resolves any config and the Phase 6 CLI TODO is
   closed. Sample artefacts regenerated from the three-round stubbed run in
   `reports/`.
+- **Second provider:** DeepSeek runs alongside Groq. Provider is chosen **per
+  agent**; the assignment in `.env.example` still puts all four on Groq, because
+  choosing where each agent runs is the operator's call after a smoke run.
+  Adding it to an existing `.env` needs `DEEPSEEK_API_KEY` and the four
+  `*_PROVIDER` variables — `LLM_PROVIDER` is gone and is now ignored.
 - **Last hotfix:** three bugs a live Groq run exposed, fixed before Phase 8:
   provider HTTP failures now map to typed errors (429/5xx retried with backoff
   and `Retry-After`; 401 and 404 raised straight through), every configured
@@ -233,6 +238,37 @@ work committed.
     checked, overridable through `MODEL_PRICING`; `validate_model_pricing()`
     warns once per unpriced model at startup and never fails — an unpriced model
     must still run.
+  - **There are two providers, chosen per agent.** `TARGET_PROVIDER`,
+    `ATTACKER_PROVIDER`, `DEFENDER_PROVIDER` and `CLASSIFIER_PROVIDER` each name
+    `groq` or `deepseek` and pair with that agent's model. The single
+    `LLM_PROVIDER` setting was **replaced** by those four, not shadowed by them:
+    a free tier's binding limit is a per-model token pool, so a second host is a
+    second pool, and one global setting could not express which agent uses which.
+    `JUDGE_PROVIDER` is deliberately left outside the enum — the Tier 3 judge is
+    cut (B4) and lives on a third host. Both providers speak the OpenAI
+    chat-completions shape, so there is **one** live client, `ChatCompletionsLLM`,
+    parameterised by provider and base URL; that is what keeps the
+    status-to-typed-error mapping singular, and a second copy of that mapping is
+    how an unmapped 429 ends a run. Base URLs are configuration and live in
+    `PROVIDER_BASE_URLS`, next to the model ids and under the same rule.
+  - **A provider host is not a target host.** `DEFAULT_PROVIDER_HOSTS` is derived
+    from `PROVIDER_BASE_URLS`, so adding a provider in config adds its egress
+    permission; `TARGET_ALLOWLIST` names attack targets and must never gain a
+    provider. Keeping the two lists apart is what stops a provider from becoming
+    reachable as a target.
+  - **Pacing windows are keyed `provider:model`.** Two providers are two pools —
+    that is the reason for having two — so `groq:X` and `deepseek:X` must never
+    share a window. `CostMeter.call` passes `price_key(provider, model)` to the
+    pacer, and `ProviderPacer.limits_for()` reads the limits from the provider
+    half of the key. The global `PROVIDER_TOKENS_PER_MINUTE` /
+    `PROVIDER_REQUESTS_PER_MINUTE` pair is only the default; `PROVIDER_RATE_LIMITS`
+    (`provider=tokens/requests`) overrides it per provider, because the two hosts
+    do not publish the same limits.
+  - **`crucible experiment run` now paces itself.** Until the second provider
+    went in, `loop_settings_for()` left every pacing field at its offline default
+    of 0, so an experiment run — including `--smoke` — called the providers as
+    fast as the loop could generate work. `ExperimentContext.pacing`, filled by
+    `pacing_settings(settings)` in the CLI, is what carries the limits in.
   - **No model id may appear outside `crucible/config.py` and `.env.example`.**
     A typer option default for `--model` made editing `.env` a no-op, which is
     how a decommissioned model survived a configuration change.
@@ -321,7 +357,7 @@ work committed.
 | 4 | complete | 1.5 | LangGraph attacker (survey → select_parents → strategize → generate fan-out → novelty_filter → self_critique → capped regenerate), six named mutation operators with full lineage, `ArchiveSurvey` service so no agent holds a repository, stale-elite and breacher-preferring parent selection for the 21 never-breached elites Phase 5 measured, black-box/white-box modes with `grey_box` failing validation on D2, and clean budget exhaustion. 492 tests green. |
 | 6 | complete | 1.5 | The ten-step round loop as a checkpointed LangGraph graph with an assertable event log, the never-cut regression check (named attack ids, config not promoted), the holdout generalization check, two-stage evaluation preserved through `EvaluationScope`, collapse detection with six named halt reasons, Wilson intervals on every reported rate with two-proportion tests, `runs`/`rounds` schema, `AsyncPostgresSaver` checkpointing with mid-round resume, and the typer + rich CLI. 550 tests green. |
 | 7 | complete | 0.5 | Reporting: `defense_configs` table + migration 0009, `report run`/`report round` (md and json), redaction, lineage trees, three matplotlib visuals, `archive reclassify --dry-run`. 27 new tests; 577 pass in total. |
-| 8 | scaffolding complete | 1.0 | Seven committed experiment configs with guarded ablation knobs, `crucible experiment run`, a second `TargetAdapter` (Meridian clinic: own prompt, 60-doc corpus, four different tools) proving the Protocol needs no loop changes, `experiment_results` + migration 0011, `crucible findings regenerate [--check]` wired into CI, `docs/findings.md` scaffolding with generated blocks and TODO(interpretation) prose, README leading with the rules of engagement verbatim, Apache-2.0 LICENSE. Live providers wired into `loop start` and `experiment run` behind `--provider` (groq by default), run provenance + `stubbed` flag (migration 0012), STUBBED RUN banners, findings refusal, real `model_overlap`, and `--smoke`. Experiments not yet run. 967 tests pass, 1 skipped (judge calibration, cut B4). |
+| 8 | scaffolding complete | 1.0 | Seven committed experiment configs with guarded ablation knobs, `crucible experiment run`, a second `TargetAdapter` (Meridian clinic: own prompt, 60-doc corpus, four different tools) proving the Protocol needs no loop changes, `experiment_results` + migration 0011, `crucible findings regenerate [--check]` wired into CI, `docs/findings.md` scaffolding with generated blocks and TODO(interpretation) prose, README leading with the rules of engagement verbatim, Apache-2.0 LICENSE. Live providers wired into `loop start` and `experiment run` behind `--provider` (groq by default), run provenance + `stubbed` flag (migration 0012), STUBBED RUN banners, findings refusal, real `model_overlap`, and `--smoke`. Experiments not yet run. Then DeepSeek added as a second provider: per-agent provider settings replacing `LLM_PROVIDER`, one `ChatCompletionsLLM` for both hosts, dated pricing, per-provider pacing windows, and experiment runs paced at last. 1008 tests pass, 1 skipped (judge calibration, cut B4). |
 
 ---
 

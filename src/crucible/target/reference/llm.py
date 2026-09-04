@@ -1,9 +1,15 @@
 """The reference target's language model boundary.
 
 Two implementations: a scripted stub used by tests and offline development, and
-a Groq client for real runs. Both run at temperature 0 — the Phase 2 outcome
+one live client for real runs. Both run at temperature 0 — the Phase 2 outcome
 cache is only sound if an identical (attack, defense) pair produces an identical
 response, so temperature is a constant of this module, not a setting.
+
+There is a single live client, `ChatCompletionsLLM`, because every provider this
+project talks to speaks the OpenAI chat-completions shape. It is parameterised
+by provider and base URL rather than duplicated per host, so a provider's HTTP
+status maps to our typed errors in exactly one place — that mapping was a
+hotfix, and a second copy of it is a second thing to get wrong.
 
 Every real call is metered: wrap any `TargetLLM` in `MeteredTargetLLM` and the
 `CostMeter` records provider, model, tokens, and cost, and stops the round when
@@ -21,6 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from crucible.config import PROVIDER_BASE_URLS, LLMProvider
 from crucible.logging import get_logger
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
@@ -32,8 +39,6 @@ logger = get_logger(__name__)
 
 #: Not configurable. See the module docstring.
 TARGET_TEMPERATURE = 0.0
-
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
 class LLMMessage(BaseModel):
@@ -289,12 +294,18 @@ class MeteredTargetLLM:
 # --------------------------------------------------------------------------- #
 
 
-class GroqTargetLLM:
-    """Groq's OpenAI-compatible chat completions API, at temperature 0.
+class ChatCompletionsLLM:
+    """An OpenAI-compatible chat completions API, at temperature 0.
 
-    The client is injected so that the executor can pass one built on the egress
-    guard's transport, and so tests can pass `httpx.MockTransport`. No test in
-    this repository makes a live call.
+    One class for every provider: Groq and DeepSeek differ only in base URL and
+    credential, so parameterising is what keeps the status-to-typed-error
+    mapping in `complete` singular. `provider` has no default — a client that
+    did not have to name its provider could be handed one provider's key and
+    another's endpoint, and the only symptom would be a 401 mid-run.
+
+    The HTTP client is injected so that the executor can pass one built on the
+    egress guard's transport, and so tests can pass `httpx.MockTransport`. No
+    test in this repository makes a live call.
     """
 
     def __init__(
@@ -303,18 +314,20 @@ class GroqTargetLLM:
         client: httpx.AsyncClient,
         *,
         model: str,
-        base_url: str = GROQ_BASE_URL,
+        provider: LLMProvider,
+        base_url: str | None = None,
         timeout: float = 60.0,
     ) -> None:
         self._api_key = api_key
         self._client = client
         self._model = model
-        self._base_url = base_url.rstrip("/")
+        self._provider = provider
+        self._base_url = (base_url or PROVIDER_BASE_URLS[provider.value]).rstrip("/")
         self._timeout = timeout
 
     @property
     def provider(self) -> str:
-        return "groq"
+        return self._provider.value
 
     @property
     def model(self) -> str:

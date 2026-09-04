@@ -7,10 +7,15 @@ stubbed run produces numbers of exactly the same shape as a real one, so the
 only safe arrangement is that reaching for one has to be deliberate and leaves a
 mark.
 
-Model ids come from settings — `TARGET_MODEL`, `ATTACKER_MODEL`,
-`DEFENDER_MODEL`, `CLASSIFIER_MODEL` — never from a literal here. A literal in
-this module would be the same defect the model-id hotfix removed: editing `.env`
-would stop changing what runs.
+`--provider` chooses between live models and test doubles. It does **not**
+choose which provider a run calls: that is per agent, read from
+`TARGET_PROVIDER`, `ATTACKER_PROVIDER`, `DEFENDER_PROVIDER` and
+`CLASSIFIER_PROVIDER`. Two providers exist so that the four agents can be spread
+across two rate-limit pools, and a single flag could not express that.
+
+Model ids and base URLs come from settings — never from a literal here. A
+literal in this module would be the same defect the model-id hotfix removed:
+editing `.env` would stop changing what runs.
 """
 
 from __future__ import annotations
@@ -20,20 +25,26 @@ from enum import StrEnum
 
 import httpx
 
-from crucible.archive.classifier import GroqClassifierClient, ScriptedClassifierClient
-from crucible.attacker.llm import GroqAttackerLLM, ScriptedAttackerLLM
-from crucible.config import Settings
-from crucible.defender.llm import GroqDefenderLLM, ScriptedDefenderLLM
+from crucible.archive.classifier import ChatClassifierClient, ScriptedClassifierClient
+from crucible.attacker.llm import ChatAttackerLLM, ScriptedAttackerLLM
+from crucible.config import LLMProvider, Settings
+from crucible.defender.llm import ChatDefenderLLM, ScriptedDefenderLLM
 from crucible.execution.egress import EgressGuard, guarded_client
 from crucible.logging import get_logger
 from crucible.loop.runner import LoopFactories
-from crucible.target.reference.llm import GroqTargetLLM, ScriptedTargetLLM
+from crucible.target.reference.llm import ChatCompletionsLLM, ScriptedTargetLLM
 
 logger = get_logger(__name__)
 
 
 class Provider(StrEnum):
-    """Where a run's model calls go."""
+    """Whether a run calls real models or test doubles.
+
+    `groq` is the live value and the default. It is named for a provider for
+    historical reasons — it predates per-agent provider selection — and now
+    means "live, with each agent on the provider its settings name", which for
+    a default `.env` is Groq throughout.
+    """
 
     GROQ = "groq"
     #: Deterministic test doubles. Never a default, always recorded as stubbed.
@@ -41,10 +52,12 @@ class Provider(StrEnum):
 
 
 def build_factories(settings: Settings, provider: Provider, stack: AsyncExitStack) -> LoopFactories:
-    """The four model clients for one run.
+    """The four model clients for one run, each on its configured provider.
 
     `stack` owns the HTTP client's lifetime, so a live run closes its connection
-    pool when the run ends rather than when the process does.
+    pool when the run ends rather than when the process does. One client serves
+    every provider: the egress guard permits each provider's host, and the base
+    URL travels with the call.
     """
     if provider is Provider.SCRIPTED:
         logger.warning(
@@ -64,34 +77,61 @@ def build_factories(settings: Settings, provider: Provider, stack: AsyncExitStac
         )
 
     client = _client(settings, stack)
-    key = settings.GROQ_API_KEY
     logger.info(
         "run.live_clients",
         extra={
-            "provider": provider.value,
-            "target_model": settings.TARGET_MODEL,
-            "attacker_model": settings.ATTACKER_MODEL,
-            "defender_model": settings.DEFENDER_MODEL,
-            "classifier_model": settings.CLASSIFIER_MODEL,
+            "agents": {
+                role: f"{agent_provider.value}/{model}"
+                for role, agent_provider, model in settings.agents
+            }
         },
     )
     return LoopFactories(
-        target_llm=lambda: GroqTargetLLM(key, client, model=settings.TARGET_MODEL),
-        attacker_llm=lambda: GroqAttackerLLM(key, client, model=settings.ATTACKER_MODEL),
-        defender_llm=lambda: GroqDefenderLLM(key, client, model=settings.DEFENDER_MODEL),
-        classifier_client=lambda: GroqClassifierClient(
-            key, client, model=settings.CLASSIFIER_MODEL
+        target_llm=lambda: ChatCompletionsLLM(
+            settings.api_key_for(settings.TARGET_PROVIDER),
+            client,
+            model=settings.TARGET_MODEL,
+            provider=settings.TARGET_PROVIDER,
+        ),
+        attacker_llm=lambda: ChatAttackerLLM(
+            settings.api_key_for(settings.ATTACKER_PROVIDER),
+            client,
+            model=settings.ATTACKER_MODEL,
+            provider=settings.ATTACKER_PROVIDER,
+        ),
+        defender_llm=lambda: ChatDefenderLLM(
+            settings.api_key_for(settings.DEFENDER_PROVIDER),
+            client,
+            model=settings.DEFENDER_MODEL,
+            provider=settings.DEFENDER_PROVIDER,
+        ),
+        classifier_client=lambda: ChatClassifierClient(
+            settings.api_key_for(settings.CLASSIFIER_PROVIDER),
+            client,
+            model=settings.CLASSIFIER_MODEL,
+            provider=settings.CLASSIFIER_PROVIDER,
         ),
     )
 
 
-def attacker_on(settings: Settings, model: str, stack: AsyncExitStack) -> GroqAttackerLLM:
+def attacker_on(
+    settings: Settings,
+    model: str,
+    stack: AsyncExitStack,
+    *,
+    provider: LLMProvider | None = None,
+) -> ChatAttackerLLM:
     """One attacker client on a named model, for the overlap experiment.
 
     The model is passed explicitly because that experiment's whole point is to
-    run two families against an identical starting state.
+    run two families against an identical starting state. The provider defaults
+    to `ATTACKER_PROVIDER`, so which host those families are fetched from is the
+    operator's configuration choice, not this module's.
     """
-    return GroqAttackerLLM(settings.GROQ_API_KEY, _client(settings, stack), model=model)
+    chosen = provider or settings.ATTACKER_PROVIDER
+    return ChatAttackerLLM(
+        settings.api_key_for(chosen), _client(settings, stack), model=model, provider=chosen
+    )
 
 
 def _client(settings: Settings, stack: AsyncExitStack) -> httpx.AsyncClient:

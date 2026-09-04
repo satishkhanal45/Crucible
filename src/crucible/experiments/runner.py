@@ -23,7 +23,7 @@ import random
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from crucible.attacker.llm import AttackerLLM
@@ -120,6 +120,27 @@ class ExperimentContext:
     allowlist: tuple[str, ...]
     checkpointer_settings: Any = None
     corpus: list[Any] | None = None
+    #: Free-tier pacing, as `LoopSettings` field names. Empty means unpaced,
+    #: which is what an offline test wants and what a live run must never get:
+    #: the CLI fills it from settings via `pacing_settings()`.
+    pacing: Mapping[str, Any] = field(default_factory=dict)
+
+
+def pacing_settings(settings: Any) -> dict[str, Any]:
+    """The pacing fields of `LoopSettings`, read from process settings.
+
+    An experiment that skipped these would call both providers as fast as the
+    loop can generate work, which on a free tier means a 429 storm rather than a
+    result. The per-provider limits travel with the pair, because the two hosts
+    do not publish the same ones.
+    """
+    return {
+        "provider_max_concurrency": settings.PROVIDER_MAX_CONCURRENCY,
+        "provider_min_interval_seconds": settings.PROVIDER_MIN_INTERVAL_SECONDS,
+        "provider_tokens_per_minute": settings.PROVIDER_TOKENS_PER_MINUTE,
+        "provider_requests_per_minute": settings.PROVIDER_REQUESTS_PER_MINUTE,
+        "provider_rate_limits": settings.provider_rate_limits,
+    }
 
 
 def loop_settings_for(experiment: ExperimentConfig, **overrides: Any) -> LoopSettings:
@@ -153,7 +174,7 @@ async def run_loop_experiment(
     starting_config: DefenseConfig | None = None,
 ) -> RunReport:
     """Run `main` or one of the three loop ablations."""
-    settings = loop_settings_for(experiment)
+    settings = loop_settings_for(experiment, **context.pacing)
     async with AsyncExitStack() as stack:
         checkpointer = None
         if context.checkpointer_settings is not None:
@@ -184,7 +205,7 @@ async def run_layer_ablation(
     Configs are resolved from `defense_configs` by id, which is why Phase 7's
     table was a blocking prerequisite for this phase.
     """
-    settings = loop_settings_for(experiment)
+    settings = loop_settings_for(experiment, **context.pacing)
     resolved = await _resolve_config(context.database, config_id, experiment.source_run_id)
     components = await build_components(
         context.database,
@@ -238,7 +259,7 @@ async def run_transfer(
     component is assembled exactly as it is for the main run.
     """
     resolved = await _resolve_config(context.database, config_id, experiment.source_run_id)
-    settings = loop_settings_for(experiment)
+    settings = loop_settings_for(experiment, **context.pacing)
     components = await build_components(
         context.database,
         settings=settings,
@@ -324,7 +345,7 @@ async def run_model_overlap(
             f"{sorted(attacker_factories)}. One family cannot overlap with itself."
         )
 
-    settings = loop_settings_for(experiment)
+    settings = loop_settings_for(experiment, **context.pacing)
     # Both families face the identical starting state; `config` is accepted so a
     # caller can compare them against a hardened config rather than D(0).
     del config

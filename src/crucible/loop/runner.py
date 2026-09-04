@@ -74,9 +74,14 @@ class LoopSettings(BaseModel):
     #: so a pool wider than the provider bound would only queue inside the meter.
     provider_max_concurrency: int = Field(default=1, ge=1, le=16)
     provider_min_interval_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
-    #: Per-model rolling window. 0 disables it, which is what offline runs use.
+    #: Per-provider, per-model rolling window. 0 disables it, which is what
+    #: offline runs use.
     provider_tokens_per_minute: int = Field(default=0, ge=0, le=10_000_000)
     provider_requests_per_minute: int = Field(default=0, ge=0, le=10_000)
+    #: Per-provider overrides of the pair above, `{provider: (tokens, requests)}`.
+    #: A run spread across two providers is spread across two rate-limit pools,
+    #: and they do not publish the same limits.
+    provider_rate_limits: dict[str, tuple[int, int]] = Field(default_factory=dict)
     #: The three guarded knobs, defaulting to their never-cut values. Only a
     #: named ablation in `experiments/` may move one; `ExperimentConfig` is
     #: where that is enforced, before a `LoopSettings` is ever built.
@@ -118,6 +123,7 @@ async def build_components(
         settings.provider_max_concurrency,
         tokens_per_minute=settings.provider_tokens_per_minute,
         requests_per_minute=settings.provider_requests_per_minute,
+        limits=settings.provider_rate_limits,
     )
     cost_meter = (
         CostMeter(
@@ -197,14 +203,32 @@ async def build_components(
         defender_scope=settings.defender_scope,
         # Read from the clients themselves rather than from the settings that
         # were meant to build them: what ran is what gets recorded.
-        provenance=RunProvenance(
-            agents=(
-                _agent("target", target_llm),
-                _agent("attacker", attacker.llm),
-                _agent("defender", defender.llm),
-                _agent("classifier", classifier.client),
-            )
+        provenance=provenance_for(
+            target=target_llm,
+            attacker=attacker.llm,
+            defender=defender.llm,
+            classifier=classifier.client,
         ),
+    )
+
+
+def provenance_for(
+    *, target: object, attacker: object, defender: object, classifier: object
+) -> RunProvenance:
+    """What each of the four agents says it is.
+
+    Named and separate from `build_components` so the recording can be asserted
+    without standing up a database. Providers are per agent, so a run may have
+    two of them here, and the run row is the only record of which agent ran
+    where — that record is what makes a mixed run reproducible.
+    """
+    return RunProvenance(
+        agents=(
+            _agent("target", target),
+            _agent("attacker", attacker),
+            _agent("defender", defender),
+            _agent("classifier", classifier),
+        )
     )
 
 

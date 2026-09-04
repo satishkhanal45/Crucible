@@ -14,13 +14,14 @@ from typing import cast
 import httpx
 import pytest
 
+from crucible.config import LLMProvider
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, ModelPrice, price_key
 from crucible.services.retry import RateLimited
 from crucible.target.canary import CanarySet
 from crucible.target.reference.llm import (
     TARGET_TEMPERATURE,
-    GroqTargetLLM,
+    ChatCompletionsLLM,
     LLMMessage,
     MeteredTargetLLM,
     ScriptedTargetLLM,
@@ -166,7 +167,7 @@ async def test_groq_requests_temperature_zero_and_parses_a_reply() -> None:
         )
 
     async with _groq_client(handler) as client:
-        llm = GroqTargetLLM("key-123", client, model=MODEL)
+        llm = ChatCompletionsLLM("key-123", client, model=MODEL, provider=LLMProvider.GROQ)
         reply = await llm.complete(_messages("hello"), TOOL_SPECS)
 
     body = captured["body"]
@@ -204,9 +205,9 @@ async def test_groq_parses_tool_calls() -> None:
         )
 
     async with _groq_client(handler) as client:
-        reply = await GroqTargetLLM("key", client, model=MODEL).complete(
-            _messages("go"), TOOL_SPECS
-        )
+        reply = await ChatCompletionsLLM(
+            "key", client, model=MODEL, provider=LLMProvider.GROQ
+        ).complete(_messages("go"), TOOL_SPECS)
 
     assert reply.text == ""
     assert reply.tool_calls[0].name == SEND_EMAIL
@@ -228,7 +229,9 @@ async def test_groq_raises_a_retryable_error_on_429() -> None:
 
     async with _groq_client(handler) as client:
         with pytest.raises(RateLimited) as raised:
-            await GroqTargetLLM("key", client, model=MODEL).complete(_messages("go"), TOOL_SPECS)
+            await ChatCompletionsLLM(
+                "key", client, model=MODEL, provider=LLMProvider.GROQ
+            ).complete(_messages("go"), TOOL_SPECS)
 
     assert raised.value.retry_after == 3.0
     assert "rate limited" in str(raised.value)

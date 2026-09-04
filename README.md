@@ -120,11 +120,14 @@ crucible report run --charts reports  # rewrites the three visuals
 
 ## Quickstart
 
-Requirements: Docker, `uv`, and a Groq API key (the free tier is enough).
+Requirements: Docker, `uv`, and API keys for both providers — Groq and DeepSeek
+(free tiers are enough). Each of the four agents is pointed at one provider or
+the other in `.env`, so a run can spread its calls across two rate-limit pools;
+the default configuration puts all four on Groq.
 
 ```bash
 git clone <this repository> && cd crucible
-cp .env.example .env          # then put your GROQ_API_KEY in it
+cp .env.example .env          # then put your GROQ_API_KEY and DEEPSEEK_API_KEY in it
 ```
 
 **Port conflicts.** Compose publishes `${POSTGRES_PORT:-5432}` and

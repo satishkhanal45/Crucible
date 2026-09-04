@@ -13,11 +13,12 @@ from typing import Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from crucible.config import LLMProvider
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
 from crucible.services.pacing import estimate_tokens
 from crucible.target.adapter import ToolSpec
-from crucible.target.reference.llm import GroqTargetLLM, LLMMessage
+from crucible.target.reference.llm import ChatCompletionsLLM, LLMMessage
 
 
 class DefenderReply(BaseModel):
@@ -67,11 +68,13 @@ class ScriptedDefenderLLM:
         )
 
 
-class GroqDefenderLLM:
-    """Groq chat completions, reusing the target's client. Temperature 0."""
+class ChatDefenderLLM:
+    """Live chat completions, reusing the one OpenAI-shaped client. Temperature 0."""
 
-    def __init__(self, api_key: str, client: httpx.AsyncClient, *, model: str) -> None:
-        self._inner = GroqTargetLLM(api_key, client, model=model)
+    def __init__(
+        self, api_key: str, client: httpx.AsyncClient, *, model: str, provider: LLMProvider
+    ) -> None:
+        self._inner = ChatCompletionsLLM(api_key, client, model=model, provider=provider)
 
     @property
     def provider(self) -> str:
@@ -127,9 +130,9 @@ class MeteredDefenderLLM:
 
 
 __all__ = [
+    "ChatDefenderLLM",
     "DefenderLLM",
     "DefenderReply",
-    "GroqDefenderLLM",
     "MeteredDefenderLLM",
     "ScriptedDefenderLLM",
     "ToolSpec",

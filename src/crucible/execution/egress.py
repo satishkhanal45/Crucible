@@ -16,16 +16,18 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from crucible.config import Settings
+from crucible.config import Settings, provider_hosts
 from crucible.logging import get_logger
 
 logger = get_logger(__name__)
 
-#: Hosts for the LLM providers in the locked stack (project_context.md).
-DEFAULT_PROVIDER_HOSTS: tuple[str, ...] = (
-    "api.groq.com",
-    "generativelanguage.googleapis.com",
-)
+#: Hosts for the LLM providers this process can call, derived from the base URLs
+#: in `crucible.config`, so adding a provider there is what adds its host here.
+#:
+#: These are **not** `TARGET_ALLOWLIST`. That list names attack targets; this one
+#: names model providers. Keeping them separate is what stops a provider from
+#: becoming reachable as a target, or a target from being called as a provider.
+DEFAULT_PROVIDER_HOSTS: tuple[str, ...] = provider_hosts()
 
 
 class EgressViolation(RuntimeError):

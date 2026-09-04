@@ -12,10 +12,13 @@ live providers, small caps.
 from __future__ import annotations
 
 import inspect
+import io
 
 import pytest
+from rich.console import Console
 
 from crucible.cli import main as cli_main
+from crucible.config import LLMProvider, Settings
 from crucible.experiments.config import (
     SMOKE_BUDGET,
     SMOKE_CANDIDATES,
@@ -25,6 +28,20 @@ from crucible.experiments.config import (
     smoke_experiment,
 )
 from crucible.experiments.runner import ProviderMismatch, mean_nearest_distance, overlap_by_cell
+
+
+def _announced(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    provider: cli_main.Provider = cli_main.Provider.GROQ,
+) -> str:
+    """What `_announce_provider` writes to the terminal, as text."""
+    buffer = io.StringIO()
+    monkeypatch.setattr(cli_main, "console", Console(file=buffer, width=200, no_color=True))
+    cli_main._announce_provider(settings, provider)
+    return buffer.getvalue()
+
 
 # --------------------------------------------------- failing loudly
 
@@ -128,16 +145,51 @@ def test_the_smoke_flag_exists_and_is_off_by_default() -> None:
     )
 
 
-def test_the_smoke_run_prints_provider_models_and_cost() -> None:
-    """What the operator reads before committing five hours."""
-    announce = inspect.getsource(cli_main._announce_provider)
+def test_the_smoke_run_prints_provider_models_and_cost(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the operator reads before committing five hours.
+
+    Asserted against the rendered output rather than the source: the announcement
+    reads the four agents out of settings, so there is no role name in the code
+    to grep for, and what matters is what the operator sees anyway.
+    """
+    printed = _announced(settings, monkeypatch)
     dispatch = inspect.getsource(cli_main._run_experiment)
     cost = inspect.getsource(cli_main._print_cost)
 
-    assert "target" in announce and "attacker" in announce
-    assert "TARGET_MODEL" in announce or "settings.TARGET_MODEL" in announce
+    for role, provider, model in settings.agents:
+        assert role in printed, f"{role} is not named in the announcement"
+        assert provider.value in printed, f"{role}'s provider is not named"
+        assert model.split("/")[-1] in printed, f"{role}'s model is not named"
     assert "_print_cost" in dispatch
     assert "cost is $0.000000" in cost, "a zero cost on a live run must be called out"
+
+
+def test_the_announcement_names_the_provider_of_every_agent_in_a_mixed_run(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run split across two providers says so before it spends anything."""
+    mixed = settings.model_copy(
+        update={
+            "ATTACKER_PROVIDER": LLMProvider.DEEPSEEK,
+            "ATTACKER_MODEL": "deepseek-chat",
+        }
+    )
+
+    printed = _announced(mixed, monkeypatch)
+
+    assert "deepseek" in printed and "groq" in printed
+    assert "2 providers in this run" in printed
+
+
+def test_a_scripted_run_is_announced_as_stubbed(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    printed = _announced(settings, monkeypatch, provider=cli_main.Provider.SCRIPTED)
+
+    assert "stubbed" in printed
+    assert "STUBBED RUN" in printed
 
 
 def test_a_zero_cost_on_a_live_run_is_flagged() -> None:
