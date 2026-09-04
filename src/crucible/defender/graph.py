@@ -94,6 +94,26 @@ def cluster_breaches(breaches: Sequence[BreachSummary]) -> list[Cluster]:
     ]
 
 
+#: How much of a model reply to carry into a log line or a rejection record.
+#: Long enough to see the shape of the JSON and the offending key.
+RAW_REPLY_CHARS = 500
+
+
+def field_errors(error: Exception) -> list[str]:
+    """`field: message` for each pydantic error, or one entry for a TypeError."""
+    if not isinstance(error, ValidationError):
+        return [f"<root>: {error}"]
+    return [
+        f"{'.'.join(str(part) for part in detail['loc']) or '<root>'}: {detail['msg']}"
+        for detail in error.errors()
+    ]
+
+
+def describe_validation_error(error: Exception) -> str:
+    """A one-line summary naming the fields, for a log line and a report."""
+    return "; ".join(field_errors(error))
+
+
 def parse_json_object(text: str) -> dict[str, object] | None:
     match = _JSON.search(text or "")
     if match is None:
@@ -216,26 +236,49 @@ class Defender:
         payload = parse_json_object(reply.text)
 
         if payload is None or "config" not in payload:
-            return {
-                "rejected": [
-                    RejectedProposal(
-                        raw=reply.text[:200],
-                        reason="proposal was not a JSON object carrying a config",
-                    )
-                ]
-            }
-        return self._materialise(payload)
+            reason = (
+                "reply contained no JSON object"
+                if payload is None
+                else f"JSON object has no 'config' key (keys: {sorted(payload)})"
+            )
+            # WARNING, with the reply itself: a run that rejected every candidate
+            # for six rounds and logged no reason is a run that cannot be
+            # diagnosed afterwards.
+            logger.warning(
+                "defender.proposal_rejected",
+                extra={
+                    "candidate_index": index,
+                    "stage": "parse",
+                    "reason": reason,
+                    "raw": reply.text[:RAW_REPLY_CHARS],
+                },
+            )
+            return {"rejected": [RejectedProposal(raw=reply.text[:RAW_REPLY_CHARS], reason=reason)]}
+        return self._materialise(payload, candidate_index=index)
 
-    def _materialise(self, payload: dict[str, object]) -> DefenderState:
+    def _materialise(
+        self, payload: dict[str, object], *, candidate_index: int = 0
+    ) -> DefenderState:
         """Turn a model reply into a proposal, or into a rejection."""
         try:
             config = DefenseConfig.model_validate(payload["config"])
         except (ValidationError, TypeError) as error:
+            raw = json.dumps(payload.get("config"))[:RAW_REPLY_CHARS]
+            logger.warning(
+                "defender.proposal_rejected",
+                extra={
+                    "candidate_index": candidate_index,
+                    "stage": "schema",
+                    "reason": describe_validation_error(error),
+                    "fields": field_errors(error),
+                    "raw": raw,
+                },
+            )
             return {
                 "rejected": [
                     RejectedProposal(
-                        raw=json.dumps(payload.get("config"))[:200],
-                        reason=f"schema validation failed: {error}",
+                        raw=raw,
+                        reason=f"schema validation failed: {describe_validation_error(error)}",
                     )
                 ]
             }
@@ -255,6 +298,14 @@ class Defender:
             try:
                 proposal.config.assert_production_safe()
             except UnsafeDefense as error:
+                logger.warning(
+                    "defender.proposal_rejected",
+                    extra={
+                        "stage": "safety",
+                        "reason": str(error),
+                        "raw": json.dumps(proposal.config.to_dict())[:RAW_REPLY_CHARS],
+                    },
+                )
                 rejected.append(RejectedProposal(raw=proposal.config_id, reason=str(error)))
                 continue
             if proposal.config_id in seen:
@@ -262,9 +313,18 @@ class Defender:
             seen.add(proposal.config_id)
             kept.append(proposal)
 
+        # Every reason, at WARNING, when nothing survived. `kept: 0` with no
+        # explanation is exactly what made six rounds of failure undiagnosable.
+        carried = list(state.get("rejected", []))
+        if not kept:
+            for item in carried + rejected:
+                logger.warning(
+                    "defender.candidate_rejected",
+                    extra={"reason": item.reason, "raw": item.raw[:RAW_REPLY_CHARS]},
+                )
         logger.info(
             "defender.validate",
-            extra={"kept": len(kept), "rejected": len(rejected) + len(state.get("rejected", []))},
+            extra={"kept": len(kept), "rejected": len(rejected) + len(carried)},
         )
         return {"validated": kept, "rejected": rejected}
 

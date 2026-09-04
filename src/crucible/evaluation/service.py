@@ -295,11 +295,21 @@ class EvaluationService:
             config, attacks, scope=EvaluationScope.FULL, archive_size=len(attacks)
         )
 
-    async def evaluate_utility(self, config: DefenseConfig) -> UtilityEvaluation:
+    async def utility_results(self, config: DefenseConfig) -> tuple[TaskResult, ...]:
+        """Every benign task's outcome under `config`, passes included.
+
+        `evaluate_utility` reduces this to counts. The full list is what
+        `crucible eval utility --verbose` prints: a pass rate of 0.425 says
+        something is wrong, and only the per-task assertions say what.
+        """
         results: list[TaskResult] = []
         for task in self._tasks:
             response = await self._benign.run(task.query, config)
             results.append(check_task(task, response))
+        return tuple(results)
+
+    async def evaluate_utility(self, config: DefenseConfig) -> UtilityEvaluation:
+        results = list(await self.utility_results(config))
 
         hard = [result for result in results if result.hard_negative]
         return UtilityEvaluation(

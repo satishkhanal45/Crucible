@@ -233,6 +233,29 @@ def _provenance_lines(report: RunReport) -> list[str]:
     return [f"- {agent.render()}" for agent in report.provenance.agents]
 
 
+def _unchanged_config_lines(run: RunReport) -> list[str]:
+    """Say so, loudly, when the defense never changed.
+
+    A run whose D(n) is still D(0) can still show a rising archive block rate —
+    one did, 0.583 to 0.643 over six rounds — because the archive is growing and
+    the newer attacks include ones the target refuses unaided. That is a
+    property of the attacks added, not of any defense, and a curve that climbs
+    beside an unchanged configuration invites exactly the wrong reading.
+    """
+    if run.final_config_id != run.starting_config_id:
+        return []
+    return [
+        "",
+        "> [!IMPORTANT]",
+        "> **The defense configuration never changed in this run: D(n) is still "
+        "D(0).** Any movement in the archive block rate below therefore reflects "
+        "which attacks entered the archive, not hardening — with a fixed "
+        "configuration the block rate is a property of the attack set. Nothing "
+        "in this report may be read as a defense improving.",
+        "",
+    ]
+
+
 def render_run_report(data: ReportData, *, include_payloads: bool = False) -> str:
     """The whole run, as Markdown. Deterministic for a given database state."""
     for report in data.rounds:
@@ -258,6 +281,7 @@ def render_run_report(data: ReportData, *, include_payloads: bool = False) -> st
         "loop starts weak and any hardening is visible",
         f"- final configuration: `{run.final_config_id}`",
         f"- rounds completed: `{run.rounds_completed}`",
+        *_unchanged_config_lines(run),
         *_provenance_lines(run),
         f"- status: `{run.status.value}`"
         + (f" (`{run.halt_reason.value}`)" if run.halt_reason else ""),

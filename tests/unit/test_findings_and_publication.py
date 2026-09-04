@@ -32,6 +32,18 @@ SPEC = ROOT / "docs" / "spec.md"
 #: The live measurement, transcribed from a run of the real classifier over the
 #: 40 hand-labelled seeds with the rewritten prompt.
 MEASURED = ClassifierAgreement(
+    model_name="deepseek-v4-flash",
+    total=40,
+    objective_agreed=38,
+    technique_agreed=32,
+    combined_agreed=30,
+    unclassified=0,
+)
+
+#: The earlier measurement, on the model the classifier prompt was tuned
+#: against. Kept because findings reports both: the same prompt scoring
+#: differently on two models is part of the result.
+MEASURED_GPT_OSS = ClassifierAgreement(
     model_name="openai/gpt-oss-120b",
     total=40,
     objective_agreed=36,
@@ -147,6 +159,15 @@ def test_every_generated_rate_carries_an_interval() -> None:
 def test_the_agreement_block_regenerates_per_axis() -> None:
     rendered = findings.render_agreement(_with_agreement(MEASURED))
 
+    assert "| objective | `38/40` (95%) | measurement |" in rendered
+    assert "| technique | `32/40` (80%) | measurement |" in rendered
+    assert "| combined | `30/40` (75%) | measurement |" in rendered
+
+
+def test_the_earlier_measurement_still_renders_per_axis() -> None:
+    """The gpt-oss figures are history, not deleted history."""
+    rendered = findings.render_agreement(_with_agreement(MEASURED_GPT_OSS))
+
     assert "| objective | `36/40` (90%) | measurement |" in rendered
     assert "| technique | `30/40` (75%) | measurement |" in rendered
     assert "| combined | `26/40` (65%) | soft metric |" in rendered
@@ -160,6 +181,9 @@ def test_the_measured_tradeoff_is_recorded_not_just_the_improvement() -> None:
     assert "22/40 (55%)" in text and "30/40 (75%)" in text
     assert "21/40 (52%)" in text and "26/40 (65%)" in text
     assert "tradeoff, not an improvement" in text
+    # And the measurement on the model the loop actually ran on.
+    assert "38/40 (95%)" in text and "32/40 (80%)" in text and "30/40 (75%)" in text
+    assert "deepseek-v4-flash" in text
 
 
 def test_technique_agreement_below_the_threshold_is_labelled_soft() -> None:

@@ -27,7 +27,7 @@ from crucible.defenses.config import (
     Spotlighting,
     StructuralLayer,
 )
-from crucible.evaluation.benign import load_benign_tasks
+from crucible.evaluation.benign import BenignTask, load_benign_tasks
 from crucible.evaluation.objective import utility_loss
 from crucible.evaluation.service import (
     EvaluationScope,
@@ -117,6 +117,32 @@ class UnusedExecutor:
         raise AssertionError("utility evaluation must not execute attacks")
 
 
+async def tasks_for(store: DocumentStore) -> list[BenignTask]:
+    """The committed tasks, with `expect_docs` re-derived for THIS store.
+
+    The committed `expect_docs` are what retrieval returned under the production
+    embedder, `all-MiniLM-L6-v2`. This suite runs the offline hashing embedder,
+    which retrieves different documents for the same query — so scoring the
+    committed values here would be the exact defect this file's own header
+    warns about: measuring a recording made under one embedder against
+    retrieval performed by another. That mistake, in production, is what made a
+    live run read 0.425 utility with no defense applied.
+
+    Re-deriving keeps this test's question intact — *with no defenses at all,
+    does every benign task still work end to end?* — while leaving the question
+    of whether the committed recording is current to
+    `tests/unit/test_benign_expectations.py`, which checks it deterministically
+    and offline against the configured embedder and the corpus hash.
+    """
+    derived: list[BenignTask] = []
+    for task in load_benign_tasks():
+        hits = await store.search(task.query)
+        derived.append(
+            task.model_copy(update={"expect_docs": tuple(hit.document.doc_id for hit in hits)})
+        )
+    return derived
+
+
 @pytest.fixture
 async def evaluation(database_url: str, migrated: Config) -> AsyncIterator[EvaluationService]:
     """An evaluation service over the full corpus, as the utility set expects."""
@@ -134,7 +160,9 @@ async def evaluation(database_url: str, migrated: Config) -> AsyncIterator[Evalu
             return target
 
         pool = TargetPool(factory, size=1)
-        yield EvaluationService(database, UnusedExecutor(), PoolBenignRunner(pool))
+        async with pool.acquire() as target:
+            tasks = await tasks_for(target.store)  # type: ignore[attr-defined]
+        yield EvaluationService(database, UnusedExecutor(), PoolBenignRunner(pool), tasks=tasks)
     finally:
         await database.close()
 

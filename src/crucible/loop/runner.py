@@ -329,13 +329,18 @@ class LoopRunner:
             )
 
         try:
+            # Measured ONCE, here, against D(0), before any round runs. Every
+            # round's utility is compared against this and never against the
+            # previous round, so a slow drift cannot creep past the check.
             baseline = await self._loop._parts.evaluation.evaluate_utility(config)
             baseline_rate = baseline.pass_rate
+            baseline_trials = baseline.total
         except BudgetExceeded:
             # No budget even for the baseline: the run still opens, and the first
             # round halts cleanly rather than crashing here.
             logger.warning("loop.budget_exceeded", extra={"node": "baseline_utility"})
             baseline_rate = 1.0
+            baseline_trials = 0
         async with self._database.session() as session:
             await DefenseConfigRepository(session).save(config, label="D(0)")
             await RunRepository(session).create(
@@ -359,6 +364,7 @@ class LoopRunner:
             "current_config": config,
             "previous_config": None,
             "baseline_utility": baseline_rate,
+            "baseline_utility_trials": baseline_trials,
             "events": [],
             "signals": [],
             "reports": [],

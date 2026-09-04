@@ -68,6 +68,9 @@ class LoopState(TypedDict, total=False):
     current_config: DefenseConfig
     previous_config: DefenseConfig | None
     baseline_utility: float
+    #: The denominator behind `baseline_utility`, so a decline can be tested
+    #: for significance rather than compared as a bare point estimate.
+    baseline_utility_trials: int
     #: Per-attack outcomes under D(n-1), for the regression check.
     before_outcomes: dict[str, str]
 

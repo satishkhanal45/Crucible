@@ -38,6 +38,7 @@ from crucible.cli.providers import Provider, attacker_on, build_factories
 from crucible.config import ConfigurationError, Settings, get_settings
 from crucible.db.session import Database
 from crucible.defenses.config import DefenseConfig
+from crucible.evaluation.benign import StaleExpectations, assert_expectations_current
 from crucible.experiments.config import (
     ExperimentConfig,
     ExperimentKind,
@@ -87,6 +88,7 @@ from crucible.services.retry import (
     ProviderTimeout,
     RateLimited,
 )
+from crucible.target.reference.corpus_gen import load_corpus as load_reference_corpus
 
 console = Console()
 app = typer.Typer(add_completion=False, help="Crucible — a co-evolutionary red-team loop.")
@@ -141,6 +143,14 @@ def _handled() -> Iterator[None]:
         if _debug:
             raise
         _fail(str(error), "Set the missing variables in .env; see .env.example.")
+    except StaleExpectations as error:
+        if _debug:
+            raise
+        _fail(
+            str(error),
+            "Re-record data/benign_tasks.yaml under the configured embedder, or set "
+            "EMBEDDING_MODEL back to the one it names.",
+        )
     except StubbedRunRefused as error:
         if _debug:
             raise
@@ -267,6 +277,18 @@ def _announce_provider(settings: Settings, provider: Provider) -> None:
         )
 
 
+def _check_expectations(settings: Settings) -> None:
+    """Refuse to measure utility against expectations recorded elsewhere.
+
+    Called by every command that scores the benign set. `expect_docs` records
+    what retrieval returned, so it is invalidated by a change of embedder or
+    corpus — and the failure mode is silent: the utility rate simply drops, the
+    selection objective weights it 2.0, and `utility_collapse` halts the run on
+    a defense that did nothing wrong. A loud refusal is the only honest option.
+    """
+    assert_expectations_current(settings.EMBEDDING_MODEL, load_reference_corpus())
+
+
 def _factories(settings: Settings, provider: Provider, stack: AsyncExitStack) -> LoopFactories:
     """The model clients for one run. Live unless `--provider scripted`.
 
@@ -332,6 +354,7 @@ def loop_start(
     """Start a run. D(0) is always the empty config, so the loop starts weak."""
     settings = _settings()
     _announce_provider(settings, provider)
+    _check_expectations(settings)
     loop_settings = LoopSettings(
         rounds=rounds,
         mode=AttackerMode(mode),
@@ -378,6 +401,7 @@ def loop_resume(
     """Continue a checkpointed run from where it stopped."""
     settings = _settings()
     _announce_provider(settings, provider)
+    _check_expectations(settings)
     report = asyncio.run(_resume(settings, uuid.UUID(run_id), provider))
     _print_run(report)
 
@@ -466,6 +490,14 @@ def _print_run(report: RunReport) -> None:
         f"  D(0) {report.starting_config_id[:12]} -> D(n) {report.final_config_id[:12]}, "
         f"{report.rounds_completed} rounds, {report.total_regressions} regressions"
     )
+    if report.final_config_id == report.starting_config_id:
+        # A block rate that climbs beside an unchanged configuration is the
+        # archive changing, not the defense. Said here as well as in the report.
+        console.print(
+            "[yellow]  the defense never changed: D(n) is still D(0), so any movement "
+            "in the block rate below is a property of the attacks added, not hardening"
+            "[/yellow]"
+        )
     table = Table(show_header=True)
     for column in (
         "round",
@@ -509,7 +541,123 @@ def eval_defense(
     """Evaluate one stored config against the archive, the holdout set, or utility."""
     settings = _settings()
     _announce_provider(settings, provider)
+    _check_expectations(settings)
     asyncio.run(_eval(settings, config_id, which, provider))
+
+
+@eval_app.command("utility")
+@handled
+def eval_utility(
+    config_id: Annotated[
+        str | None,
+        typer.Option("--config-id", help="Defaults to D(0), the empty config."),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Per-task pass/fail with the failing assertion.")
+    ] = False,
+    provider: Annotated[
+        Provider,
+        typer.Option(
+            "--provider",
+            help=(
+                "groq (live: each agent on the provider its settings name) or "
+                "scripted (test doubles)."
+            ),
+        ),
+    ] = Provider.GROQ,
+) -> None:
+    """Run the benign task set and show which tasks fail, and why.
+
+    Against the LIVE target by default. The utility term is weighted 2.0 in the
+    selection objective and the `utility_collapse` halt watches it, so a pass
+    rate that is wrong for reasons other than the defense makes both meaningless.
+    """
+    settings = _settings()
+    _announce_provider(settings, provider)
+    _check_expectations(settings)
+    asyncio.run(_eval_utility(settings, config_id, verbose, provider))
+
+
+async def _eval_utility(
+    settings: Settings, config_id: str | None, verbose: bool, provider: Provider
+) -> None:
+    database = Database(settings.DATABASE_URL)
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(database.close)
+        config = DefenseConfig.empty()
+        if config_id is not None:
+            async with database.session() as session:
+                stored = await DefenseConfigRepository(session).get(config_id)
+            if stored is None:
+                console.print(f"[red]no config {config_id}[/red]")
+                raise typer.Exit(code=1)
+            config = stored
+
+        components = await build_components(
+            database,
+            settings=LoopSettings(**pacing_settings(settings)),
+            factories=_factories(settings, provider, stack),
+            embedder=default_embedder(settings),
+            allowlist=tuple(settings.TARGET_ALLOWLIST),
+        )
+        results = await components.evaluation.utility_results(config)
+
+        passed = [result for result in results if result.passed]
+        hard = [result for result in results if result.hard_negative]
+        console.print(
+            f"config [cyan]{config.fingerprint()[:12]}[/cyan]"
+            + (" (D(0), the empty config)" if config == DefenseConfig.empty() else "")
+        )
+        console.print(
+            f"utility {len(passed)}/{len(results)} "
+            f"({len(passed) / max(1, len(results)):.1%}); hard negatives "
+            f"{sum(1 for result in hard if result.passed)}/{len(hard)}"
+        )
+        if verbose:
+            table = Table(title="benign tasks")
+            for column in ("task", "hard", "result", "failing assertion"):
+                table.add_column(column, overflow="fold")
+            for result in results:
+                table.add_row(
+                    result.task_id,
+                    "yes" if result.hard_negative else "",
+                    "[green]pass[/green]" if result.passed else "[red]FAIL[/red]",
+                    "; ".join(result.failures),
+                )
+            console.print(table)
+
+        # The assertions are named, so a systematic failure is visible as one
+        # bucket rather than as forty separate lines.
+        buckets: dict[str, int] = {}
+        for result in results:
+            for failure in result.failures:
+                buckets[_assertion_kind(failure)] = buckets.get(_assertion_kind(failure), 0) + 1
+        if buckets:
+            summary = Table(title="failures by assertion")
+            summary.add_column("assertion")
+            summary.add_column("tasks")
+            for kind, count in sorted(buckets.items(), key=lambda item: -item[1]):
+                summary.add_row(kind, str(count))
+            console.print(summary)
+
+
+#: The distinct assertions `check_task` can fail, for the summary bucket.
+_ASSERTION_KINDS = (
+    ("a defense layer blocked", "blocked by a defense layer"),
+    ("output contract violated", "output contract"),
+    ("the target refused", "refusal"),
+    ("no citations", "no citations"),
+    ("cited documents that were not retrieved", "fabricated citation"),
+    ("but none of the expected", "cited outside expect_docs"),
+    ("expected phrase", "expect_text missing"),
+)
+
+
+def _assertion_kind(failure: str) -> str:
+    for marker, name in _ASSERTION_KINDS:
+        if marker in failure:
+            return name
+    return "other"
 
 
 async def _eval(settings: Settings, config_id: str, which: EvalSet, provider: Provider) -> None:
@@ -785,6 +933,7 @@ def experiment_run(
     elif rounds is not None:
         experiment = experiment.model_copy(update={"rounds": rounds})
     _announce_provider(settings, provider)
+    _check_expectations(settings)
     if experiment.violates_never_cut:
         console.print(
             f"[yellow]{experiment.name} switches off a never-cut property on purpose: "

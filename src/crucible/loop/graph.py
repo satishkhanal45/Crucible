@@ -400,6 +400,8 @@ class CoEvolutionLoop:
                 new_cells=report.new_cells,
                 novelty_rejection_rate=_rejection_rate(report),
                 utility_pass_rate=report.utility_pass.rate,
+                utility_successes=report.utility_pass.successes,
+                utility_trials=report.utility_pass.trials,
                 overfit_gap=report.overfit_gap,
                 cost_usd=report.cost_usd,
             ),
@@ -431,6 +433,7 @@ class CoEvolutionLoop:
             else detect(
                 state.get("signals", []),
                 baseline_utility=float(state.get("baseline_utility", 1.0)),
+                baseline_utility_trials=int(state.get("baseline_utility_trials", 0)),
                 budget_usd=self._parts.budget_usd,
             )
         )
