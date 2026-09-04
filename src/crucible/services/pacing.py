@@ -154,6 +154,7 @@ class ProviderPacer:
         tokens_per_minute: int = 0,
         requests_per_minute: int = 0,
         limits: Mapping[str, tuple[int, int]] | None = None,
+        concurrency: Mapping[str, int] | None = None,
         sleep: SleepFn = asyncio.sleep,
         clock: ClockFn = time.monotonic,
     ) -> None:
@@ -170,11 +171,19 @@ class ProviderPacer:
         #: Per-provider overrides of the pair above, keyed by provider name.
         #: Two providers publish different limits and never share a pool.
         self._limits = dict(limits or {})
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        #: Per-provider concurrency. A free tier wants one call in flight; a
+        #: paid one can overlap, and holding it to one wastes most of the run.
+        self._concurrency = dict(concurrency or {})
+        #: One semaphore and one schedule per provider: spacing calls to a slow
+        #: free tier must not also space calls to a paid one.
+        self._semaphores: dict[str, asyncio.Semaphore] = {}
+        self._next_allowed: dict[str, float] = {}
+        # ONE lock for every window, deliberately. The check and the booking
+        # have to be atomic across providers as well as within one, or parallel
+        # calls all pass `wait_for` before any of them records an entry.
         self._gate = asyncio.Lock()
         self._sleep = sleep
         self._clock = clock
-        self._next_allowed: float | None = None
         self._windows: dict[str, ModelWindow] = {}
         #: Total seconds spent waiting, for tests and for the round log.
         self.waited_seconds = 0.0
@@ -193,6 +202,7 @@ class ProviderPacer:
         tokens_per_minute: int = 0,
         requests_per_minute: int = 0,
         limits: Mapping[str, tuple[int, int]] | None = None,
+        concurrency: Mapping[str, int] | None = None,
     ) -> ProviderPacer:
         return cls(
             min_interval_seconds=min_interval_seconds,
@@ -200,6 +210,7 @@ class ProviderPacer:
             tokens_per_minute=tokens_per_minute,
             requests_per_minute=requests_per_minute,
             limits=limits,
+            concurrency=concurrency,
         )
 
     @property
@@ -238,17 +249,33 @@ class ProviderPacer:
         tokens, requests = self.limits_for(key)
         return tokens > 0 and requests > 0
 
+    @staticmethod
+    def provider_of(key: str) -> str:
+        """The provider half of a `provider:model` pacing key."""
+        provider, separator, _ = key.partition(":")
+        return provider.strip().lower() if separator else ""
+
+    def concurrency_for(self, key: str) -> int:
+        """Concurrent calls allowed for this key's provider."""
+        return max(1, self._concurrency.get(self.provider_of(key), self._max_concurrency))
+
+    def _semaphore_for(self, key: str) -> asyncio.Semaphore:
+        provider = self.provider_of(key)
+        semaphore = self._semaphores.get(provider)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(self.concurrency_for(key))
+            self._semaphores[provider] = semaphore
+        return semaphore
+
     def limits_for(self, key: str) -> tuple[int, int]:
         """`(tokens_per_minute, requests_per_minute)` for one `provider:model`.
 
         The provider half of the key selects the limits; a provider with no
         entry falls back to the configured pair.
         """
-        provider, separator, _ = key.partition(":")
-        if separator:
-            override = self._limits.get(provider.strip().lower())
-            if override is not None:
-                return override
+        override = self._limits.get(self.provider_of(key))
+        if override is not None:
+            return override
         return (self._tokens_per_minute, self._requests_per_minute)
 
     def window_for(self, model: str) -> ModelWindow:
@@ -275,12 +302,14 @@ class ProviderPacer:
         window.prune(self._clock())
         return window.tokens_used
 
-    async def _wait_turn(self) -> None:
-        """Claim the next slot in the schedule, then sleep outside the lock."""
+    async def _wait_turn(self, key: str) -> None:
+        """Claim the next slot in this provider's schedule, then sleep."""
+        provider = self.provider_of(key)
         async with self._gate:
             now = self._clock()
-            start_at = now if self._next_allowed is None else max(now, self._next_allowed)
-            self._next_allowed = start_at + self._interval
+            previous = self._next_allowed.get(provider)
+            start_at = now if previous is None else max(now, previous)
+            self._next_allowed[provider] = start_at + self._interval
             delay = start_at - now
         await self._pause(delay)
 
@@ -322,9 +351,9 @@ class ProviderPacer:
         provider reports. `CostMeter.call` does that for every metered call, so
         no agent has to remember to.
         """
-        async with self._semaphore:
+        async with self._semaphore_for(model):
             if self._interval > 0:
-                await self._wait_turn()
+                await self._wait_turn(model)
             entry = (
                 await self._reserve(model, max(1, estimated_tokens)) if estimated_tokens else None
             )

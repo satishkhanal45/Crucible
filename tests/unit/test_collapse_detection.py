@@ -18,7 +18,7 @@ from crucible.loop.collapse import (
     RoundSignals,
     detect,
 )
-from crucible.loop.reports import HaltReason, RunStatus
+from crucible.loop.reports import COLLAPSE_REASONS, OPERATIONAL_REASONS, HaltReason, RunStatus
 
 
 def signals(
@@ -174,9 +174,27 @@ def test_every_signal_has_its_own_named_halt_reason() -> None:
         ),
     }
 
-    assert set(cases) == set(HaltReason), "every halt reason must be reachable"
+    assert set(cases) == COLLAPSE_REASONS, "every collapse signal must be reachable"
     for expected, (history, kwargs) in cases.items():
         assert detect(history, **kwargs) is expected  # type: ignore[arg-type]
+
+
+def test_every_halt_reason_is_classified_and_reachable() -> None:
+    """A halt reason belongs to the search or to the run's conditions.
+
+    `detect` produces the collapse signals; a round node records the operational
+    ones (a provider that stayed unreachable after its retries). Both sets are
+    named, so a new reason that is neither still fails this test rather than
+    quietly becoming unreachable.
+    """
+    assert set(HaltReason) == COLLAPSE_REASONS | OPERATIONAL_REASONS
+    assert not COLLAPSE_REASONS & OPERATIONAL_REASONS
+
+
+def test_an_operational_halt_is_not_a_collapse_signal() -> None:
+    """It says the provider failed, never that the search converged."""
+    assert HaltReason.PROVIDER_UNAVAILABLE not in COLLAPSE_REASONS
+    assert detect([signals(index, novelty=0.9) for index in range(3)]) is None
 
 
 def test_a_halted_run_is_not_a_failed_run() -> None:

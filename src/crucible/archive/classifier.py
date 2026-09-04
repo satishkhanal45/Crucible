@@ -21,7 +21,7 @@ from typing import Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict
 
-from crucible.config import LLMProvider
+from crucible.config import DEFAULT_READ_TIMEOUT_SECONDS, LLMProvider
 from crucible.logging import get_logger
 from crucible.schemas.spend import TokenUsage
 from crucible.schemas.taxonomy import Objective, Technique
@@ -232,11 +232,19 @@ class ChatClassifierClient:
     """
 
     def __init__(
-        self, api_key: str, client: httpx.AsyncClient, *, model: str, provider: LLMProvider
+        self,
+        api_key: str,
+        client: httpx.AsyncClient,
+        *,
+        model: str,
+        provider: LLMProvider,
+        timeout: httpx.Timeout | float = DEFAULT_READ_TIMEOUT_SECONDS,
     ) -> None:
         from crucible.target.reference.llm import ChatCompletionsLLM
 
-        self._inner = ChatCompletionsLLM(api_key, client, model=model, provider=provider)
+        self._inner = ChatCompletionsLLM(
+            api_key, client, model=model, provider=provider, timeout=timeout
+        )
 
     @property
     def provider(self) -> str:

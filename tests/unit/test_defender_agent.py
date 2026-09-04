@@ -16,11 +16,12 @@ import pytest
 
 from crucible.defender.graph import (
     STATUS_IMPROVED,
+    STATUS_NO_CANDIDATES,
     STATUS_NO_IMPROVEMENT,
     Defender,
     cluster_breaches,
 )
-from crucible.defender.llm import MeteredDefenderLLM, ScriptedDefenderLLM
+from crucible.defender.llm import DefenderReply, MeteredDefenderLLM, ScriptedDefenderLLM
 from crucible.defender.prompts import (
     HoldoutLeak,
     assert_no_holdout,
@@ -42,6 +43,7 @@ from crucible.evaluation.service import (
     UtilityEvaluation,
 )
 from crucible.services.cost_meter import CostMeter, ModelPrice, price_key
+from crucible.services.retry import ProviderTimeout, RetryPolicy
 from crucible.target.canary import CanaryClass, CanarySet, set_active_canaries
 from tests.fixtures.fake_spend import FakeSpendRepository
 
@@ -472,3 +474,124 @@ async def test_every_defender_call_is_metered() -> None:
 
     assert len(repository.records) == 4, "one hypothesis call plus three proposals"
     assert all(record.provider == "stub" for record in repository.records)
+
+
+# ------------------------------------------------- a failed branch is not a failed run
+#
+# A live run died on `httpx.ReadTimeout` inside `propose_one`. The provider
+# error now has to cost that branch and nothing more: the surviving candidates
+# are still screened and selected from, and a round that loses every branch says
+# so with its own status rather than crashing or posing as "no improvement".
+
+
+class TimingOutDefenderLLM(ScriptedDefenderLLM):
+    """Raises a timeout on the nth proposal call, and scripts the rest.
+
+    The timeout it raises is what reaches `propose_one` after the retry policy
+    has already given up, which is the case the node has to contain.
+    """
+
+    def __init__(self, replies: list[str], *, fail_on: set[int]) -> None:
+        super().__init__(replies)
+        self._fail_on = fail_on
+        self.calls = 0
+
+    async def complete(self, prompt: str) -> DefenderReply:
+        self.calls += 1
+        if self.calls in self._fail_on:
+            raise ProviderTimeout("deepseek", "deepseek-v4-flash", 180.0)
+        return await super().complete(prompt)
+
+
+def _defender(
+    llm: object, screener: FakeScreener, *, candidates: int = 3, attempts: int = 1
+) -> Defender:
+    """A defender whose retries are already spent, unless a test says otherwise.
+
+    `attempts=1` is what makes a raised timeout reach the node: with the real
+    policy the meter would back off and try again, which is the behaviour
+    `test_the_meter_retries_a_defender_timeout_before_the_node_sees_it` covers.
+    """
+    meter = CostMeter(
+        FakeSpendRepository(),
+        Decimal("5.00"),
+        retry_policy=RetryPolicy(attempts=attempts, base_delay=0.0),
+    )
+    return Defender(
+        MeteredDefenderLLM(llm, meter),  # type: ignore[arg-type]
+        screener,
+        candidates=candidates,
+        max_propose_rounds=1,
+    )
+
+
+async def test_a_timed_out_branch_leaves_the_other_branches_intact() -> None:
+    """One candidate is lost; the round still selects from the survivors."""
+    screener = FakeScreener(
+        results={HARDENED.fingerprint(): evaluation(HARDENED, block_rate=0.9, utility=1.0)}
+    )
+    # Call 1 is the hypothesis; calls 2-4 are the three proposal branches.
+    llm = TimingOutDefenderLLM(
+        [hypothesis_reply(), proposal_reply(HARDENED), proposal_reply(OVER_BLOCKING)],
+        fail_on={2},
+    )
+
+    result = await _defender(llm, screener).run(base_state())
+
+    assert result["status"] == STATUS_IMPROVED
+    assert result["chosen_id"] == HARDENED.fingerprint()
+    reasons = [item.reason for item in result.get("rejected", [])]
+    assert any("provider call failed" in reason for reason in reasons)
+    assert any("did not answer" in reason for reason in reasons), "the reason names the timeout"
+
+
+async def test_the_meter_retries_a_defender_timeout_before_the_node_sees_it() -> None:
+    """Retry first, contain second: a slow call should cost time, not a candidate."""
+    screener = FakeScreener(
+        results={HARDENED.fingerprint(): evaluation(HARDENED, block_rate=0.9, utility=1.0)}
+    )
+    llm = TimingOutDefenderLLM(
+        [hypothesis_reply(), *[proposal_reply(HARDENED) for _ in range(3)]], fail_on={2}
+    )
+
+    result = await _defender(llm, screener, attempts=3).run(base_state())
+
+    assert result["status"] == STATUS_IMPROVED
+    assert not result.get("rejected"), "a retried timeout costs no candidate at all"
+
+
+async def test_a_round_that_loses_every_branch_is_named_not_crashed() -> None:
+    """Zero valid configs is a condition with a name, not an exception."""
+    llm = TimingOutDefenderLLM([hypothesis_reply()], fail_on={2, 3, 4})
+
+    result = await _defender(llm, FakeScreener()).run(base_state())
+
+    assert result["status"] == STATUS_NO_CANDIDATES
+    assert result["chosen"] == DefenseConfig.empty(), "the incumbent stands"
+    assert len(result.get("rejected", [])) == 3
+
+
+async def test_no_candidates_is_distinct_from_no_improvement() -> None:
+    """They are different facts and must not read as the same result."""
+    screener = FakeScreener(default_block_rate=0.0, default_utility=1.0)
+    scripted = ScriptedDefenderLLM(
+        [hypothesis_reply(), *[proposal_reply(DefenseConfig.empty()) for _ in range(3)]]
+    )
+
+    result = await _defender(scripted, screener).run(base_state())
+
+    assert result["status"] == STATUS_NO_IMPROVEMENT
+    assert STATUS_NO_IMPROVEMENT != STATUS_NO_CANDIDATES
+
+
+async def test_a_timed_out_hypothesis_does_not_end_the_round() -> None:
+    """The cluster falls back to its default statement, as a bad reply does."""
+    screener = FakeScreener(
+        results={HARDENED.fingerprint(): evaluation(HARDENED, block_rate=0.9, utility=1.0)}
+    )
+    llm = TimingOutDefenderLLM([proposal_reply(HARDENED)] * 3, fail_on={1})
+
+    result = await _defender(llm, screener).run(base_state())
+
+    assert result["status"] == STATUS_IMPROVED
+    assert result["chosen_id"] == HARDENED.fingerprint()

@@ -2,6 +2,7 @@
 
 from crucible.defender.graph import (
     STATUS_IMPROVED,
+    STATUS_NO_CANDIDATES,
     STATUS_NO_IMPROVEMENT,
     Defender,
     cluster_breaches,
@@ -21,6 +22,7 @@ from crucible.defender.state import (
 
 __all__ = [
     "STATUS_IMPROVED",
+    "STATUS_NO_CANDIDATES",
     "STATUS_NO_IMPROVEMENT",
     "BreachSummary",
     "CandidateProposal",

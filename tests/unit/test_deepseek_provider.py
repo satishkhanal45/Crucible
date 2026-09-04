@@ -248,7 +248,9 @@ async def test_a_deepseek_404_names_the_model_that_was_not_found() -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("model", ["deepseek-chat", "deepseek-reasoner"])
+@pytest.mark.parametrize(
+    "model", ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
+)
 def test_the_deepseek_models_are_priced(model: str) -> None:
     """An unpriced model records NULL cost, which makes ROUND_BUDGET_USD inert."""
     key = price_key(LLMProvider.DEEPSEEK.value, model)
@@ -263,11 +265,11 @@ def test_a_run_on_deepseek_is_fully_priced(settings: Settings) -> None:
     mixed = settings.model_copy(
         update={
             "ATTACKER_PROVIDER": LLMProvider.DEEPSEEK,
-            "ATTACKER_MODEL": "deepseek-chat",
+            "ATTACKER_MODEL": "deepseek-v4-flash",
         }
     )
 
-    assert price_key("deepseek", "deepseek-chat") in mixed.configured_models
+    assert price_key("deepseek", "deepseek-v4-flash") in mixed.configured_models
     assert mixed.unpriced_models() == ()
 
 
@@ -338,7 +340,7 @@ async def test_one_provider_filling_its_window_still_delays_itself() -> None:
     )
 
     for _ in range(2):
-        async with pacer.slot(model="deepseek:deepseek-chat", estimated_tokens=900):
+        async with pacer.slot(model="deepseek:deepseek-v4-flash", estimated_tokens=900):
             pass
 
     assert clock.slept, "the second call on the same provider and model waits"
@@ -353,8 +355,8 @@ def test_limits_are_configurable_per_provider() -> None:
     )
 
     assert pacer.limits_for("groq:openai-model") == (6500, 25)
-    assert pacer.limits_for("deepseek:deepseek-chat") == (100_000, 60)
-    assert pacer.window_for("deepseek:deepseek-chat").tokens_per_minute == 100_000
+    assert pacer.limits_for("deepseek:deepseek-v4-flash") == (100_000, 60)
+    assert pacer.window_for("deepseek:deepseek-v4-flash").tokens_per_minute == 100_000
     assert pacer.window_for("groq:openai-model").tokens_per_minute == 6500
 
 
@@ -393,7 +395,7 @@ def _mixed(settings: Settings) -> Settings:
     return settings.model_copy(
         update={
             "ATTACKER_PROVIDER": LLMProvider.DEEPSEEK,
-            "ATTACKER_MODEL": "deepseek-chat",
+            "ATTACKER_MODEL": "deepseek-v4-flash",
         }
     )
 
@@ -415,7 +417,7 @@ async def test_a_mixed_run_records_provenance_for_each_agent(settings: Settings)
     assert provenance.banner() is None
     lines = provenance.render_lines()
     assert f"target: groq/{mixed.TARGET_MODEL}" in lines
-    assert "attacker: deepseek/deepseek-chat" in lines
+    assert "attacker: deepseek/deepseek-v4-flash" in lines
     assert f"defender: groq/{mixed.DEFENDER_MODEL}" in lines
 
 

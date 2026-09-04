@@ -173,7 +173,7 @@ def test_the_announcement_names_the_provider_of_every_agent_in_a_mixed_run(
     mixed = settings.model_copy(
         update={
             "ATTACKER_PROVIDER": LLMProvider.DEEPSEEK,
-            "ATTACKER_MODEL": "deepseek-chat",
+            "ATTACKER_MODEL": "deepseek-v4-flash",
         }
     )
 

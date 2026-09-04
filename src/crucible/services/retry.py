@@ -37,6 +37,26 @@ class TransientProviderError(ProviderError):
     """A provider failure worth retrying (5xx, connection reset, timeout)."""
 
 
+class ProviderTimeout(TransientProviderError):
+    """The provider did not answer inside our own timeout.
+
+    A `TransientProviderError` on purpose: a read timeout is a client-side
+    deadline, not a refusal, and a long prompt to a slow model is the ordinary
+    reason for one. `httpx.ReadTimeout` is in no retry policy, so letting it
+    escape ended a multi-hour run in the defender's proposal node — the same
+    class of mistake as the unmapped 429 before it.
+    """
+
+    def __init__(self, provider: str, model: str, seconds: float, kind: str = "read") -> None:
+        self.provider = provider
+        self.model = model
+        self.seconds = seconds
+        self.kind = kind
+        super().__init__(
+            f"{provider} did not answer the {kind} within {seconds:.0f}s for {model!r}"
+        )
+
+
 class ProviderConfigurationError(ProviderError):
     """A provider refusal that retrying cannot fix.
 

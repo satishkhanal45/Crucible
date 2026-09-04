@@ -27,26 +27,26 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from crucible.config import PROVIDER_BASE_URLS, LLMProvider
+from crucible.config import (
+    DEFAULT_READ_TIMEOUT_SECONDS,
+    PROVIDER_BASE_URLS,
+    LLMProvider,
+)
 from crucible.logging import get_logger
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
 from crucible.services.pacing import estimate_tokens
-from crucible.services.retry import provider_error_for
+from crucible.services.retry import (
+    ProviderTimeout,
+    TransientProviderError,
+    provider_error_for,
+)
 from crucible.target.adapter import ToolSpec
 
 logger = get_logger(__name__)
 
 #: Not configurable. See the module docstring.
 TARGET_TEMPERATURE = 0.0
-
-
-class LLMMessage(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    role: str
-    content: str
-    name: str | None = None
 
 
 class RequestedToolCall(BaseModel):
@@ -56,6 +56,34 @@ class RequestedToolCall(BaseModel):
 
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    #: The provider's own id for this call. It is what pairs the call with its
+    #: result in the next request, so it must survive the round trip. Empty when
+    #: a client did not supply one; the caller assigns a deterministic id then,
+    #: because a random one would break the outcome cache.
+    call_id: str = ""
+
+
+class LLMMessage(BaseModel):
+    """One message in a chat-completions conversation.
+
+    The three optional fields are the OpenAI tool-calling contract, and they are
+    not decoration: an assistant turn that requested tools must be replayed
+    **with** its `tool_calls`, and each tool result must name the
+    `tool_call_id` it answers. Groq accepted a conversation missing both;
+    DeepSeek rejects it with a 400 on the offending index. The contract is the
+    format's, not one provider's, so it is modelled here and enforced by
+    `validate_conversation` on the way into every client, scripted included.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    role: str
+    content: str
+    name: str | None = None
+    #: Assistant turns only: the calls this turn requested.
+    tool_calls: tuple[RequestedToolCall, ...] = ()
+    #: Tool turns only: the id of the assistant call this message answers.
+    tool_call_id: str | None = None
 
 
 class LLMReply(BaseModel):
@@ -64,6 +92,95 @@ class LLMReply(BaseModel):
     text: str
     tool_calls: tuple[RequestedToolCall, ...] = ()
     usage: TokenUsage = TokenUsage(prompt_tokens=0, completion_tokens=0)
+
+
+class MalformedConversation(ValueError):
+    """A message list that no OpenAI-compatible provider would accept.
+
+    Raised before a request is sent rather than after one is refused, so the
+    failure names our defect instead of arriving as a provider deserialisation
+    error 20 calls into a live run.
+    """
+
+
+def validate_conversation(messages: Sequence[LLMMessage]) -> None:
+    """Check the tool-calling contract over a whole conversation.
+
+    Every rule here is one a real provider enforces:
+
+    * an assistant turn's tool calls each carry an id;
+    * a `tool` message names a `tool_call_id`;
+    * that id was requested by an assistant turn **earlier** in the list — a
+      result cannot precede the call it answers;
+    * each id is answered at most once;
+    * only a `tool` message carries a `tool_call_id`.
+
+    Checked across the whole list, not per hop: with more than one round of tool
+    calling the ids must keep pairing up, and the second hop is exactly where an
+    id scheme that restarts its numbering per turn goes wrong.
+    """
+    announced: dict[str, int] = {}
+    answered: set[str] = set()
+    for index, message in enumerate(messages):
+        if message.role == "assistant":
+            for call in message.tool_calls:
+                if not call.call_id:
+                    raise MalformedConversation(
+                        f"messages[{index}]: assistant tool call {call.name!r} has no id, "
+                        f"so its result cannot be paired with it"
+                    )
+                if call.call_id in announced:
+                    raise MalformedConversation(
+                        f"messages[{index}]: tool call id {call.call_id!r} was already "
+                        f"requested at messages[{announced[call.call_id]}]"
+                    )
+                announced[call.call_id] = index
+            continue
+        if message.tool_calls:
+            raise MalformedConversation(
+                f"messages[{index}]: only an assistant turn may carry tool_calls, "
+                f"got role {message.role!r}"
+            )
+        if message.role != "tool":
+            if message.tool_call_id is not None:
+                raise MalformedConversation(
+                    f"messages[{index}]: only a tool message may carry a tool_call_id, "
+                    f"got role {message.role!r}"
+                )
+            continue
+        if not message.tool_call_id:
+            raise MalformedConversation(
+                f"messages[{index}]: tool message is missing field `tool_call_id`. "
+                f"Every tool result must name the assistant call it answers."
+            )
+        if message.tool_call_id not in announced:
+            raise MalformedConversation(
+                f"messages[{index}]: tool_call_id {message.tool_call_id!r} was not "
+                f"requested by any preceding assistant turn"
+            )
+        if message.tool_call_id in answered:
+            raise MalformedConversation(
+                f"messages[{index}]: tool_call_id {message.tool_call_id!r} was already "
+                f"answered earlier in the conversation"
+            )
+        answered.add(message.tool_call_id)
+
+
+def with_call_ids(
+    calls: Sequence[RequestedToolCall], *, start: int
+) -> tuple[RequestedToolCall, ...]:
+    """The same calls, each guaranteed an id, numbered from `start`.
+
+    A provider that supplies ids keeps them. One that does not — the scripted
+    stub, or a provider that omits them — gets `call_<n>` counted across the
+    whole conversation, so a second hop cannot reuse a first hop's id. The
+    numbering is deterministic because the outcome cache requires that an
+    identical (attack, defense) pair produce an identical exchange.
+    """
+    return tuple(
+        call if call.call_id else call.model_copy(update={"call_id": f"call_{start + offset}"})
+        for offset, call in enumerate(calls)
+    )
 
 
 @runtime_checkable
@@ -131,6 +248,10 @@ class ScriptedTargetLLM:
         return self._model
 
     async def complete(self, messages: Sequence[LLMMessage], tools: Sequence[ToolSpec]) -> LLMReply:
+        # A stub that accepts anything is a stub that lets a message-shape bug
+        # reach a live run: this one died on a provider's 400 after passing the
+        # whole suite. Validate exactly what a provider validates.
+        validate_conversation(messages)
         assembled = "\n\n".join(message.content for message in messages)
         self.seen_prompts.append(assembled)
         usage = TokenUsage(
@@ -316,7 +437,7 @@ class ChatCompletionsLLM:
         model: str,
         provider: LLMProvider,
         base_url: str | None = None,
-        timeout: float = 60.0,
+        timeout: httpx.Timeout | float = DEFAULT_READ_TIMEOUT_SECONDS,
     ) -> None:
         self._api_key = api_key
         self._client = client
@@ -324,6 +445,13 @@ class ChatCompletionsLLM:
         self._provider = provider
         self._base_url = (base_url or PROVIDER_BASE_URLS[provider.value]).rstrip("/")
         self._timeout = timeout
+        # Reported in the timeout error, so the message names the deadline that
+        # was actually applied rather than a default it may not be using.
+        self._read_timeout = (
+            timeout.read or DEFAULT_READ_TIMEOUT_SECONDS
+            if isinstance(timeout, httpx.Timeout)
+            else float(timeout)
+        )
 
     @property
     def provider(self) -> str:
@@ -334,12 +462,11 @@ class ChatCompletionsLLM:
         return self._model
 
     def _payload(self, messages: Sequence[LLMMessage], tools: Sequence[ToolSpec]) -> dict[str, Any]:
+        validate_conversation(messages)
         payload: dict[str, Any] = {
             "model": self._model,
             "temperature": TARGET_TEMPERATURE,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in messages
-            ],
+            "messages": [_message_payload(message) for message in messages],
         }
         if tools:
             payload["tools"] = [
@@ -363,12 +490,25 @@ class ChatCompletionsLLM:
         return payload
 
     async def complete(self, messages: Sequence[LLMMessage], tools: Sequence[ToolSpec]) -> LLMReply:
-        response = await self._client.post(
-            f"{self._base_url}/chat/completions",
-            json=self._payload(messages, tools),
-            headers={"Authorization": f"Bearer {self._api_key}"},
-            timeout=self._timeout,
-        )
+        payload = self._payload(messages, tools)
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                timeout=self._timeout,
+            )
+        except httpx.TimeoutException as error:
+            # Mapped, like a status code is: an unmapped timeout is in no retry
+            # policy, so it ends the run instead of backing off.
+            raise ProviderTimeout(
+                self.provider, self._model, self._read_timeout, kind=_timeout_kind(error)
+            ) from error
+        except httpx.TransportError as error:
+            raise TransientProviderError(
+                f"{self.provider} connection failed for {self._model!r}: "
+                f"{type(error).__name__}: {error}"
+            ) from error
         if response.status_code >= 400:
             # Mapped to a typed error rather than httpx's HTTPStatusError, which
             # no retry policy lists: an unmapped 429 ends the run instead of
@@ -397,6 +537,9 @@ class ChatCompletionsLLM:
                 RequestedToolCall(
                     name=str(function.get("name", "")),
                     arguments=arguments if isinstance(arguments, dict) else {},
+                    # Kept because the next request has to name it: dropping it
+                    # here is what left tool results unpaired.
+                    call_id=str(raw.get("id") or ""),
                 )
             )
         usage = body.get("usage") or {}
@@ -408,6 +551,41 @@ class ChatCompletionsLLM:
                 completion_tokens=int(usage.get("completion_tokens", 0)),
             ),
         )
+
+
+def _timeout_kind(error: httpx.TimeoutException) -> str:
+    """Which deadline expired, for a message that says what to raise."""
+    if isinstance(error, httpx.ConnectTimeout):
+        return "connect"
+    if isinstance(error, httpx.PoolTimeout):
+        return "pool"
+    if isinstance(error, httpx.WriteTimeout):
+        return "write"
+    return "read"
+
+
+def _message_payload(message: LLMMessage) -> dict[str, Any]:
+    """One message in the wire format.
+
+    The tool-calling fields are only present when they apply: a provider that
+    validates strictly rejects `tool_call_id` on a user turn as readily as it
+    rejects its absence on a tool turn.
+    """
+    payload: dict[str, Any] = {"role": message.role, "content": message.content}
+    if message.name:
+        payload["name"] = message.name
+    if message.tool_call_id:
+        payload["tool_call_id"] = message.tool_call_id
+    if message.tool_calls:
+        payload["tool_calls"] = [
+            {
+                "id": call.call_id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+            }
+            for call in message.tool_calls
+        ]
+    return payload
 
 
 #: How much of an error body to quote back. Enough to name the cause, short

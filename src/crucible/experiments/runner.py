@@ -140,6 +140,7 @@ def pacing_settings(settings: Any) -> dict[str, Any]:
         "provider_tokens_per_minute": settings.PROVIDER_TOKENS_PER_MINUTE,
         "provider_requests_per_minute": settings.PROVIDER_REQUESTS_PER_MINUTE,
         "provider_rate_limits": settings.provider_rate_limits,
+        "provider_concurrency": settings.provider_concurrency,
     }
 
 

@@ -116,6 +116,26 @@ work committed.
   `crucible eval defense <id>` resolves any config and the Phase 6 CLI TODO is
   closed. Sample artefacts regenerated from the three-round stubbed run in
   `reports/`.
+- **For the findings write-up (behaviour unchanged, recorded here so it is not
+  lost):** the loop first ran end to end on `deepseek-v4-flash`, after the tool
+  message-contract fix. The `gpt-oss` family could **not** be used for the
+  target: its structured-output path calls a built-in `json` tool, which Groq
+  rejects, so a target on that family cannot complete a turn. That is a
+  constraint on which models can serve as the target, and belongs in the
+  limitations rather than being quietly worked around.
+- **Last live failure:** a DeepSeek smoke run reached 20+ calls at 200 with no
+  429 (pacing held), then died on the target's tool loop with `messages[5]:
+  missing field tool_call_id`. Fixed in the message assembly, and the scripted
+  target now validates the contract so the next shape bug fails in CI.
+  Run df8dfe53 then cleared every real blocker — 3 attacks admitted (novelty
+  0.989/0.963/0.893), rediscovery detected on the regenerate cycles, 14 breaches
+  triaged into 7 clusters, zero 429s across ~90 calls — and died on an
+  `httpx.ReadTimeout` in the defender's `propose_one`, now fixed.
+  DeepSeek's live model list is `deepseek-v4-flash`, `deepseek-v4-pro` and
+  `deepseek-v4-flash-vision-exp`; `deepseek-chat` and `deepseek-reasoner` no
+  longer exist. **Their prices in `config.py` are unconfirmed placeholders and
+  must be checked against https://deepseek.com/pricing before any cost figure
+  reaches `docs/findings.md`.**
 - **Second provider:** DeepSeek runs alongside Groq. Provider is chosen **per
   agent**; the assignment in `.env.example` still puts all four on Groq, because
   choosing where each agent runs is the operator's call after a smoke run.
@@ -238,6 +258,56 @@ work committed.
     checked, overridable through `MODEL_PRICING`; `validate_model_pricing()`
     warns once per unpriced model at startup and never fails — an unpriced model
     must still run.
+  - **A client-side timeout is a transient error, not the end of a run.**
+    `httpx.ReadTimeout` is in no retry policy, so it escaped and killed a run in
+    the defender's `propose_one` after ~90 successful calls. Every
+    `httpx.TimeoutException` now maps to `ProviderTimeout(TransientProviderError)`
+    and is retried with backoff exactly as a 429 is. Read timeouts are per role
+    (`ROLE_READ_TIMEOUT_SECONDS`; the defender's is 180s because its proposal
+    prompt is the longest one the loop sends) and overridable per provider with
+    `PROVIDER_READ_TIMEOUTS=provider:role=seconds`. The connect timeout stays at
+    10s everywhere and is deliberately not per role.
+  - **A provider failure inside a node fails the branch, not the run.**
+    `propose_one` catches `ProviderError` and returns a `RejectedProposal`, so
+    the round is selected from the surviving candidates; `hypothesize` falls back
+    to the cluster's default statement. A round in which every branch failed is
+    `STATUS_NO_CANDIDATES` — deliberately distinct from `STATUS_NO_IMPROVEMENT`,
+    because "nothing was proposed" and "nothing was better" are different facts
+    and must not be read as the same result. If a whole node still raises, the
+    loop records `HaltReason.PROVIDER_UNAVAILABLE` and halts cleanly, the same
+    discipline `BudgetExceeded` gets. That reason is in `OPERATIONAL_REASONS`,
+    not `COLLAPSE_REASONS`: it says the provider failed, never that the search
+    converged.
+  - **Rate limits and concurrency are per provider and belong in `.env`.**
+    `PROVIDER_TOKENS_PER_MINUTE=6500` was sized for Groq's free tier; applied to
+    a paid DeepSeek key it spent most of a smoke round asleep in 40-second
+    token-budget waits. `PROVIDER_RATE_LIMITS` and `PROVIDER_CONCURRENCY` are the
+    normal knobs and are shipped set in `.env.example`; the global pair is only
+    the fallback for a provider with no entry. **These must match the account's
+    actual tier** — the code cannot know it. The pacer stays either way: it is
+    what keeps a burst from earning a 429. Its semaphore and its minimum interval
+    are per provider now, so a free tier's spacing does not throttle a paid one,
+    while the reservation lock stays global so the check-and-book across all
+    windows remains atomic. The executor pool is bounded by the **target**
+    provider's concurrency, because a pool slot is a target caller.
+  - **Tool results carry `tool_call_id`, and the assistant turn goes back in.**
+    A live DeepSeek run died on `messages[5]: missing field tool_call_id` after
+    20-odd successful calls: the target appended tool results without the id of
+    the call they answered, and never replayed the assistant turn that requested
+    them. Groq accepted that; DeepSeek validates it, and the contract is the
+    format's, not one provider's. Ids are assigned once by `with_call_ids()` and
+    counted **across hops**, so a second round of tool calling cannot reuse a
+    first round's id, and they are deterministic (`call_0`, `call_1`, …) because
+    the outcome cache requires identical inputs to produce an identical exchange.
+  - **`ScriptedTargetLLM` validates the conversation it is handed**, through
+    `validate_conversation()`, which is the same function `ChatCompletionsLLM`
+    calls before sending. That is deliberate and must not be relaxed: the shape
+    bug above passed 1008 tests because the stub accepted anything, which is the
+    same way an unmapped HTTP status, an unpriced model and a hardcoded model id
+    each reached a live run. A test double that accepts what a provider rejects
+    is not a test double. Four integration tests in
+    `tests/integration/test_target_harness.py` were passing on malformed message
+    lists until the validator went in.
   - **There are two providers, chosen per agent.** `TARGET_PROVIDER`,
     `ATTACKER_PROVIDER`, `DEFENDER_PROVIDER` and `CLASSIFIER_PROVIDER` each name
     `groq` or `deepseek` and pair with that agent's model. The single

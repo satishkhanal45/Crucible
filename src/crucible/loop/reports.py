@@ -32,6 +32,30 @@ class HaltReason(StrEnum):
     UTILITY_COLLAPSE = "utility_collapse"
     OVERFITTING = "overfitting"
     BUDGET_EXCEEDED = "budget_exceeded"
+    #: A provider call failed after exhausting its retries — a timeout, or a
+    #: host that stayed unreachable. The round keeps whatever it produced and
+    #: the run halts cleanly, exactly as it does when the budget runs out. It is
+    #: an operational halt, not a signal about the search.
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+
+
+#: The reasons `crucible.loop.collapse.detect` can return: one per collapse
+#: signal in spec section 14. These say something about the SEARCH.
+COLLAPSE_REASONS: frozenset[HaltReason] = frozenset(
+    {
+        HaltReason.ATTACKER_EXHAUSTED,
+        HaltReason.SEARCH_STALLED,
+        HaltReason.REDISCOVERY_ONLY,
+        HaltReason.UTILITY_COLLAPSE,
+        HaltReason.OVERFITTING,
+        HaltReason.BUDGET_EXCEEDED,
+    }
+)
+
+#: The reasons a round node records when it cannot continue. These say something
+#: about the RUN's conditions, not about the search, and must never be read as
+#: evidence that the co-evolution converged.
+OPERATIONAL_REASONS: frozenset[HaltReason] = frozenset({HaltReason.PROVIDER_UNAVAILABLE})
 
 
 class RunStatus(StrEnum):

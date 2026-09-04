@@ -46,6 +46,7 @@ from crucible.defenses.config import DefenseConfig, UnsafeDefense
 from crucible.evaluation.objective import UTILITY_WEIGHT, ObjectiveScore, score
 from crucible.evaluation.service import DefenseEvaluation
 from crucible.logging import get_logger
+from crucible.services.retry import ProviderError
 
 logger = get_logger(__name__)
 
@@ -65,6 +66,11 @@ class CandidateScreener(Protocol):
 
 STATUS_IMPROVED = "improved"
 STATUS_NO_IMPROVEMENT = "no_improvement"
+#: Every proposal branch failed, so there was nothing to score. Named, because a
+#: round that produced no candidate at all is a different fact from a round whose
+#: candidates were all worse than the incumbent, and the two must not be read as
+#: the same result in the findings.
+STATUS_NO_CANDIDATES = "no_candidates"
 
 
 def mechanism_of(breach: BreachSummary) -> str:
@@ -144,7 +150,23 @@ class Defender:
         hypotheses: list[Hypothesis] = []
 
         for cluster in state.get("breach_clusters", []):
-            reply = await self._llm.complete(build_hypothesis_prompt(cluster, breaches, config))
+            try:
+                reply = await self._llm.complete(build_hypothesis_prompt(cluster, breaches, config))
+            except ProviderError as error:
+                # One cluster's hypothesis is not worth the run. Fall through to
+                # the same default statement an unparseable reply produces.
+                logger.warning(
+                    "defender.hypothesis_failed",
+                    extra={"cluster": cluster.cell_key, "error": str(error)},
+                )
+                hypotheses.append(
+                    Hypothesis(
+                        cluster_key=cluster.cell_key,
+                        mechanism=cluster.mechanism,
+                        statement=f"{cluster.mechanism} is unhandled",
+                    )
+                )
+                continue
             payload = parse_json_object(reply.text) or {}
             statement = str(payload.get("statement") or f"{cluster.mechanism} is unhandled")
             layers = payload.get("suggested_layers")
@@ -180,7 +202,17 @@ class Defender:
             candidate_index=index,
             utility_baseline=state.get("utility_baseline", 1.0),
         )
-        reply = await self._llm.complete(prompt)
+        try:
+            reply = await self._llm.complete(prompt)
+        except ProviderError as error:
+            # The branch fails; the round does not. A timeout that has already
+            # exhausted its retries must cost one candidate, not the whole
+            # experiment — the same discipline `BudgetExceeded` gets.
+            logger.warning(
+                "defender.proposal_failed",
+                extra={"candidate_index": index, "error": str(error)},
+            )
+            return {"rejected": [RejectedProposal(raw="", reason=f"provider call failed: {error}")]}
         payload = parse_json_object(reply.text)
 
         if payload is None or "config" not in payload:
@@ -271,6 +303,21 @@ class Defender:
                 best = (value, proposal)
 
         rounds = int(state.get("propose_rounds", 0)) + 1
+        if best is None and not candidates:
+            # Nothing survived to be scored: every branch failed. The incumbent
+            # stands, and the status says why rather than implying the
+            # candidates were merely no better.
+            logger.warning(
+                "defender.no_candidates",
+                extra={"rejected": len(state.get("rejected", [])), "round": rounds},
+            )
+            return {
+                "chosen": None,
+                "chosen_id": None,
+                "scores": scores,
+                "status": STATUS_NO_CANDIDATES,
+                "propose_rounds": rounds,
+            }
         if best is not None and best[0] > current_score:
             logger.info(
                 "defender.selected",
@@ -293,7 +340,11 @@ class Defender:
         }
 
     def after_select(self, state: DefenderState) -> str:
-        """Retry the proposal loop, up to the cap, when nothing improved."""
+        """Retry the proposal loop, up to the cap, when nothing improved.
+
+        A round with no candidates at all is retried too: the usual cause is a
+        provider that was briefly unavailable, and the cap still bounds it.
+        """
         if state.get("status") == STATUS_IMPROVED:
             return END
         if int(state.get("propose_rounds", 0)) >= self._max_rounds:

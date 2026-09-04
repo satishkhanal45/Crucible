@@ -7,7 +7,7 @@ here makes a live model call.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from decimal import Decimal
 
 import pytest
@@ -19,11 +19,18 @@ from crucible.defenses.config import DefenseConfig, StructuralLayer
 from crucible.repositories.spend import DatabaseSpendRepository
 from crucible.services.cost_meter import CostMeter
 from crucible.services.embeddings import HashingEmbedder
-from crucible.target.adapter import Document, TargetAdapter
+from crucible.target.adapter import Document, TargetAdapter, ToolSpec
 from crucible.target.canary import CanaryClass, CanaryEncoding, CanarySet, scan_text, scan_trace
 from crucible.target.contract import validate_output_contract
 from crucible.target.reference.corpus_gen import DOCSECRET_DOC_ID, load_corpus
-from crucible.target.reference.llm import MeteredTargetLLM, ScriptedTargetLLM
+from crucible.target.reference.llm import (
+    LLMMessage,
+    LLMReply,
+    MeteredTargetLLM,
+    RequestedToolCall,
+    ScriptedTargetLLM,
+    validate_conversation,
+)
 from crucible.target.reference.sessions import SESSION_B
 from crucible.target.reference.store import DocumentStore
 from crucible.target.reference.target import ReferenceTarget
@@ -357,3 +364,127 @@ async def test_an_attempt_cannot_contaminate_the_next_one(
     after = await target.query(BENIGN, DefenseConfig.empty(), SESSION_B)
     assert after.retrieved_doc_ids == baseline.retrieved_doc_ids
     assert after.text == baseline.text
+
+
+# --------------------------------------------------------------------------- #
+# The tool-calling message contract, assembled by the real target
+# --------------------------------------------------------------------------- #
+#
+# A live DeepSeek run rejected the conversation this loop builds:
+# `messages[5]: missing field tool_call_id`. These tests drive the target's own
+# loop and inspect what it hands the client, over more than one hop, because the
+# ids have to keep pairing up across hops.
+
+
+class _ToolLoopLLM(ScriptedTargetLLM):
+    """Asks for a tool on its first `hops` replies, then answers.
+
+    It records every conversation it is handed, and validates each one exactly
+    as a provider would, so a malformed assembly fails here rather than live.
+    """
+
+    def __init__(self, hops: int) -> None:
+        super().__init__()
+        self._hops = hops
+        self.conversations: list[list[LLMMessage]] = []
+
+    async def complete(self, messages: Sequence[LLMMessage], tools: Sequence[ToolSpec]) -> LLMReply:
+        del tools  # this stub decides what to call from its own script
+        validate_conversation(messages)
+        self.conversations.append(list(messages))
+        if len(self.conversations) <= self._hops:
+            return LLMReply(
+                text="",
+                tool_calls=(
+                    RequestedToolCall(
+                        name=SEND_EMAIL, arguments={"to": "ops@northwind.test", "body": "hi"}
+                    ),
+                ),
+            )
+        return LLMReply(text=json.dumps({"answer": "done", "citations": []}))
+
+
+@pytest.fixture
+async def tool_loop(
+    database_url: str, migrated: Config, integration_settings: Settings
+) -> AsyncIterator[tuple[ReferenceTarget, _ToolLoopLLM]]:
+    del migrated
+    database = Database(database_url)
+    try:
+        store = DocumentStore(database, HashingEmbedder())
+        meter = CostMeter(DatabaseSpendRepository(database), Decimal("5.00"))
+        client = _ToolLoopLLM(hops=2)
+        reference = ReferenceTarget(store, MeteredTargetLLM(client, meter), CanarySet.mint())
+        await reference.seed()
+        yield reference, client
+    finally:
+        del integration_settings
+        await database.close()
+
+
+def _tool_messages(messages: list[LLMMessage]) -> list[LLMMessage]:
+    return [message for message in messages if message.role == "tool"]
+
+
+def _assistant_calls(messages: list[LLMMessage]) -> list[RequestedToolCall]:
+    return [call for message in messages for call in message.tool_calls]
+
+
+async def test_a_tool_result_is_paired_with_the_call_it_answers(
+    tool_loop: tuple[ReferenceTarget, _ToolLoopLLM],
+) -> None:
+    """One hop: the assistant turn comes back with it, and the ids match."""
+    target, client = tool_loop
+
+    await target.query("send the policy to ops", DefenseConfig.empty(), SESSION_B)
+
+    assembled = client.conversations[1]
+    tool_messages = _tool_messages(assembled)
+    calls = _assistant_calls(assembled)
+    assert calls, "the assistant turn that requested the tool must be replayed"
+    assert len(tool_messages) == 1
+    assert tool_messages[0].tool_call_id == calls[0].call_id
+    assert tool_messages[0].tool_call_id, "the id a provider looks for"
+
+
+async def test_a_two_hop_tool_conversation_keeps_its_ids_paired(
+    tool_loop: tuple[ReferenceTarget, _ToolLoopLLM], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second hop is where a per-turn numbering scheme would collide."""
+    target, client = tool_loop
+    monkeypatch.setattr("crucible.target.reference.target.MAX_TOOL_TURNS", 2)
+
+    response = await target.query("send the policy to ops", DefenseConfig.empty(), SESSION_B)
+
+    assert len(client.conversations) == 3, "two hops, then the answering call"
+    final = client.conversations[-1]
+    calls = _assistant_calls(final)
+    tool_messages = _tool_messages(final)
+    assert len(calls) == len(tool_messages) == 2
+    assert [message.tool_call_id for message in tool_messages] == [call.call_id for call in calls]
+    assert len({call.call_id for call in calls}) == 2, "a second hop must not reuse an id"
+    assert len(response.tool_calls) == 2
+
+
+async def test_every_assembled_conversation_would_be_accepted_by_a_provider(
+    tool_loop: tuple[ReferenceTarget, _ToolLoopLLM], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asserted over every hop, not just the one the live run happened to reach."""
+    target, client = tool_loop
+    monkeypatch.setattr("crucible.target.reference.target.MAX_TOOL_TURNS", 2)
+
+    await target.query("send the policy to ops", DefenseConfig.empty(), SESSION_B)
+
+    for assembled in client.conversations:
+        validate_conversation(assembled)
+
+
+async def test_the_tool_result_still_carries_its_tool_name(
+    tool_loop: tuple[ReferenceTarget, _ToolLoopLLM],
+) -> None:
+    """The id is what pairs it; the name is what the oracle reads."""
+    target, client = tool_loop
+
+    await target.query("send the policy to ops", DefenseConfig.empty(), SESSION_B)
+
+    assert _tool_messages(client.conversations[1])[0].name == SEND_EMAIL

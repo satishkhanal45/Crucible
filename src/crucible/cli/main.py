@@ -84,6 +84,7 @@ from crucible.services.retry import (
     AuthenticationFailed,
     ModelNotFound,
     ProviderError,
+    ProviderTimeout,
     RateLimited,
 )
 
@@ -160,6 +161,15 @@ def _handled() -> Iterator[None]:
         if _debug:
             raise
         _fail(str(error), "See https://console.groq.com/docs/deprecations for retirements.")
+    except ProviderTimeout as error:
+        if _debug:
+            raise
+        _fail(
+            str(error),
+            "Raise this role's read timeout in .env, e.g. "
+            "PROVIDER_READ_TIMEOUTS=deepseek:defender=300. The defender's proposal "
+            "prompt is the longest one the loop sends.",
+        )
     except RateLimited as error:
         if _debug:
             raise

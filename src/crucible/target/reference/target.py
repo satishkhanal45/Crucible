@@ -52,6 +52,7 @@ from crucible.target.reference.llm import (
     MeteredTargetLLM,
     RequestedToolCall,
     TargetLLM,
+    with_call_ids,
 )
 from crucible.target.reference.persona import NORTHWIND
 from crucible.target.reference.sessions import (
@@ -327,16 +328,32 @@ class ReferenceTarget:
         for _ in range(MAX_TOOL_TURNS):
             if not reply.tool_calls:
                 break
+            # Ids are assigned once, here, and counted across every hop: the
+            # assistant turn we replay and the tool results that answer it must
+            # carry the same ones, and a second hop must not reuse a first
+            # hop's. `len(calls)` is that running count.
+            requested_calls = with_call_ids(reply.tool_calls, start=len(calls))
             turn_calls: list[ToolCall] = []
-            for requested in reply.tool_calls:
+            for requested in requested_calls:
                 call = await self._run_tool(
                     runtime, requested, defense, provenance, len(calls) + len(turn_calls)
                 )
                 turn_calls.append(call)
             calls.extend(turn_calls)
+            # The assistant turn that asked for the tools goes back in with its
+            # tool_calls intact. Without it the results answer nothing, which is
+            # what a strict provider rejects as a missing `tool_call_id`.
+            messages.append(
+                LLMMessage(role="assistant", content=reply.text, tool_calls=requested_calls)
+            )
             messages.extend(
-                LLMMessage(role="tool", content=call.result or call.error or "", name=call.name)
-                for call in turn_calls
+                LLMMessage(
+                    role="tool",
+                    content=call.result or call.error or "",
+                    name=call.name,
+                    tool_call_id=requested.call_id,
+                )
+                for requested, call in zip(requested_calls, turn_calls, strict=True)
             )
             reply = await self._llm.complete(messages, self._tools)
             prompt_tokens += reply.usage.prompt_tokens

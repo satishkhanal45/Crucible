@@ -82,6 +82,9 @@ class LoopSettings(BaseModel):
     #: A run spread across two providers is spread across two rate-limit pools,
     #: and they do not publish the same limits.
     provider_rate_limits: dict[str, tuple[int, int]] = Field(default_factory=dict)
+    #: Per-provider concurrent calls. One is right for a free tier; a paid tier
+    #: can overlap, and holding it to one wastes most of a round's wall clock.
+    provider_concurrency: dict[str, int] = Field(default_factory=dict)
     #: The three guarded knobs, defaulting to their never-cut values. Only a
     #: named ablation in `experiments/` may move one; `ExperimentConfig` is
     #: where that is enforced, before a `LoopSettings` is ever built.
@@ -124,6 +127,7 @@ async def build_components(
         tokens_per_minute=settings.provider_tokens_per_minute,
         requests_per_minute=settings.provider_requests_per_minute,
         limits=settings.provider_rate_limits,
+        concurrency=settings.provider_concurrency,
     )
     cost_meter = (
         CostMeter(
@@ -152,8 +156,15 @@ async def build_components(
         return target
 
     # Every attempt is a provider call, so the pool never runs wider than the
-    # provider bound; anything more would just queue inside the pacer.
-    workers = min(settings.concurrency, settings.provider_max_concurrency)
+    # bound for the provider it actually calls; anything more would just queue
+    # inside the pacer. The bound is the TARGET's, because a pool slot is a
+    # target caller — reading one global number here is what held a paid
+    # provider to a free tier's single call in flight.
+    target_provider = str(getattr(factories.target_llm(), "provider", ""))
+    provider_bound = settings.provider_concurrency.get(
+        target_provider, settings.provider_max_concurrency
+    )
+    workers = max(1, min(settings.concurrency, provider_bound))
     pool = TargetPool(factory, size=workers)
     executor = AttemptExecutor(
         pool,

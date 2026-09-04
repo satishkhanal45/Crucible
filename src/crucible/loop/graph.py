@@ -59,6 +59,7 @@ from crucible.repositories.rounds import RoundRepository
 from crucible.schemas.outcome import Outcome
 from crucible.schemas.provenance import RunProvenance
 from crucible.services.cost_meter import BudgetExceeded, CostMeter
+from crucible.services.retry import ProviderError
 from crucible.target.adapter import BehaviorSpec, TargetCapabilities
 
 logger = get_logger(__name__)
@@ -155,6 +156,20 @@ class CoEvolutionLoop:
                     event(round_number, 3, breaches=0),
                 ],
             }
+        except ProviderError as error:
+            logger.warning("loop.provider_unavailable", extra={"node": "attack"})
+            return {
+                "attacks_generated": 0,
+                "attacks_rejected_novelty": 0,
+                "mean_novelty": 0.0,
+                "breaches_found": 0,
+                "halt_reason": HaltReason.PROVIDER_UNAVAILABLE.value,
+                "events": [
+                    event(round_number, 1, error=str(error)),
+                    event(round_number, 2, executed=0),
+                    event(round_number, 3, breaches=0),
+                ],
+            }
 
         accepted = result.get("accepted", [])
         rejected = [item for item in result.get("rejected", []) if item.stage == "novelty"]
@@ -226,6 +241,21 @@ class CoEvolutionLoop:
                 "events": [
                     event(round_number, 4, breaches=len(breaches)),
                     event(round_number, 5, error=str(exceeded)),
+                    event(round_number, 6, selected=None),
+                ],
+            }
+        except ProviderError as error:
+            # The defender's own nodes contain a failed branch, so reaching here
+            # means the provider was unusable rather than slow for one call. The
+            # incumbent config stands and the run halts with a named reason: a
+            # crash would lose the rounds already completed.
+            logger.warning("loop.provider_unavailable", extra={"node": "defend"})
+            return {
+                "selected_config": None,
+                "halt_reason": HaltReason.PROVIDER_UNAVAILABLE.value,
+                "events": [
+                    event(round_number, 4, breaches=len(breaches)),
+                    event(round_number, 5, error=str(error)),
                     event(round_number, 6, selected=None),
                 ],
             }

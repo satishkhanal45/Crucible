@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 import httpx
 from pydantic import BaseModel, ConfigDict
 
-from crucible.config import LLMProvider
+from crucible.config import DEFAULT_READ_TIMEOUT_SECONDS, LLMProvider
 from crucible.schemas.spend import TokenUsage
 from crucible.services.cost_meter import CostMeter, MeteredResult
 from crucible.services.pacing import estimate_tokens
@@ -72,9 +72,17 @@ class ChatAttackerLLM:
     """
 
     def __init__(
-        self, api_key: str, client: httpx.AsyncClient, *, model: str, provider: LLMProvider
+        self,
+        api_key: str,
+        client: httpx.AsyncClient,
+        *,
+        model: str,
+        provider: LLMProvider,
+        timeout: httpx.Timeout | float = DEFAULT_READ_TIMEOUT_SECONDS,
     ) -> None:
-        self._inner = ChatCompletionsLLM(api_key, client, model=model, provider=provider)
+        self._inner = ChatCompletionsLLM(
+            api_key, client, model=model, provider=provider, timeout=timeout
+        )
 
     @property
     def provider(self) -> str:

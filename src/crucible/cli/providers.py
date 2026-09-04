@@ -77,6 +77,10 @@ def build_factories(settings: Settings, provider: Provider, stack: AsyncExitStac
         )
 
     client = _client(settings, stack)
+
+    def timeout(role: str) -> httpx.Timeout:
+        return _timeout(settings, settings.provider_for(role), role)
+
     logger.info(
         "run.live_clients",
         extra={
@@ -92,24 +96,28 @@ def build_factories(settings: Settings, provider: Provider, stack: AsyncExitStac
             client,
             model=settings.TARGET_MODEL,
             provider=settings.TARGET_PROVIDER,
+            timeout=timeout("target"),
         ),
         attacker_llm=lambda: ChatAttackerLLM(
             settings.api_key_for(settings.ATTACKER_PROVIDER),
             client,
             model=settings.ATTACKER_MODEL,
             provider=settings.ATTACKER_PROVIDER,
+            timeout=timeout("attacker"),
         ),
         defender_llm=lambda: ChatDefenderLLM(
             settings.api_key_for(settings.DEFENDER_PROVIDER),
             client,
             model=settings.DEFENDER_MODEL,
             provider=settings.DEFENDER_PROVIDER,
+            timeout=timeout("defender"),
         ),
         classifier_client=lambda: ChatClassifierClient(
             settings.api_key_for(settings.CLASSIFIER_PROVIDER),
             client,
             model=settings.CLASSIFIER_MODEL,
             provider=settings.CLASSIFIER_PROVIDER,
+            timeout=timeout("classifier"),
         ),
     )
 
@@ -130,8 +138,24 @@ def attacker_on(
     """
     chosen = provider or settings.ATTACKER_PROVIDER
     return ChatAttackerLLM(
-        settings.api_key_for(chosen), _client(settings, stack), model=model, provider=chosen
+        settings.api_key_for(chosen),
+        _client(settings, stack),
+        model=model,
+        provider=chosen,
+        timeout=_timeout(settings, chosen, "attacker"),
     )
+
+
+def _timeout(settings: Settings, provider: LLMProvider, role: str) -> httpx.Timeout:
+    """This role's deadline on this provider.
+
+    The connect timeout stays short while the read timeout is generous: a host
+    that has not completed a handshake in ten seconds is unreachable, but a
+    model working through the defender's proposal prompt is merely slow, and a
+    read deadline sized for the short prompts ended a run in `propose_one`.
+    """
+    connect, read = settings.timeout_for(provider, role)
+    return httpx.Timeout(read, connect=connect, write=read, pool=read)
 
 
 def _client(settings: Settings, stack: AsyncExitStack) -> httpx.AsyncClient:
