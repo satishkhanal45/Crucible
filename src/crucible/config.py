@@ -151,22 +151,23 @@ DEFAULT_MODEL_PRICING: Mapping[str, tuple[str, str]] = {
     "gemini:gemini-2.0-flash": ("0.10", "0.40"),
     "gemini:gemini-2.0-flash-lite": ("0.075", "0.30"),
     "gemini:gemini-1.5-flash": ("0.075", "0.30"),
-    # DeepSeek v4, 2026-09-05. These are the three ids the models endpoint
-    # returns for this account; `deepseek-chat` and `deepseek-reasoner` were
-    # removed because they no longer exist.
+    # DeepSeek v4, confirmed 2026-09-05 against
+    # https://api-docs.deepseek.com/quick_start/pricing. These are the three ids
+    # the models endpoint returns for this account; `deepseek-chat` and
+    # `deepseek-reasoner` were removed because they no longer exist.
     #
-    # !! THE RATES BELOW ARE UNCONFIRMED PLACEHOLDERS. !! They are carried over
-    # from the previous generation's published prices, because an entry with an
-    # approximate rate still enforces ROUND_BUDGET_USD while a missing entry
-    # silently disables it. They have NOT been read off a page listing v4.
-    # **Confirm every one against https://deepseek.com/pricing before any number
-    # produced with them reaches docs/findings.md** — a cost figure derived from
-    # a guessed rate is not a measurement. Override with MODEL_PRICING rather
-    # than editing this table. Cache-hit and off-peak rates are not modelled, so
-    # a recorded cost is an upper bound.
-    "deepseek:deepseek-v4-flash": ("0.27", "1.10"),
-    "deepseek:deepseek-v4-pro": ("0.55", "2.19"),
-    "deepseek:deepseek-v4-flash-vision-exp": ("0.27", "1.10"),
+    # DeepSeek publishes four input rates per model — cache hit and cache miss,
+    # each at a peak and an off-peak rate (off-peak is half of peak; peak is
+    # 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday). The meter models
+    # neither caching nor the time of day, so the rate recorded here is the
+    # **peak cache-miss** one: the most expensive of the four, which makes a
+    # recorded cost an upper bound rather than an underestimate. A run outside
+    # peak hours, or one whose prompts hit the provider's cache, costs less than
+    # findings reports, and findings says so. Override with MODEL_PRICING rather
+    # than editing this table.
+    "deepseek:deepseek-v4-flash": ("0.44", "1.32"),
+    "deepseek:deepseek-v4-pro": ("1.32", "3.96"),
+    "deepseek:deepseek-v4-flash-vision-exp": ("0.44", "1.32"),
 }
 
 

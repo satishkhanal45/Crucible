@@ -8,7 +8,9 @@ archive plus a holdout set stop either from cheating.
 
 1. This file (conventions, non-negotiables, current status).
 2. `docs/spec.md` — authoritative scope for this build.
-3. `project_context.md` — full design rationale. Consult for *why*, not *what*.
+3. `docs/handoff.md` — where the work actually stands, what is left in order,
+   and the gotchas an audit already found. Read it before touching phase 8.
+4. `project_context.md` — full design rationale. Consult for *why*, not *what*.
 
 Where `docs/spec.md` and `project_context.md` disagree, **`docs/spec.md` wins.**
 
@@ -111,6 +113,11 @@ work committed.
 - **Phase status:** Phases 0–7 complete; Phase 8 scaffolding complete, the
   experiments themselves not yet run
 - **Effort spent:** 12.5 / 13.0 units
+- **Last audited 2026-09-06:** `ruff` clean, `mypy --strict` clean on 132 source
+  files, migrations at `0012_run_provenance (head)`, **1137 tests pass, 1
+  skipped** (Tier 3 calibration, cut B4) and 3 deselected (`live` marker). Every
+  generated block in `docs/findings.md` still reads *"Not run yet"*: no
+  experiment has produced a publishable number.
 - **Last completed:** Phase 7 — reporting (tasks 0–6), verification tests 1–8
   green. `defense_configs` now stores every config by fingerprint, so
   `crucible eval defense <id>` resolves any config and the Phase 6 CLI TODO is
@@ -138,9 +145,22 @@ work committed.
   `httpx.ReadTimeout` in the defender's `propose_one`, now fixed.
   DeepSeek's live model list is `deepseek-v4-flash`, `deepseek-v4-pro` and
   `deepseek-v4-flash-vision-exp`; `deepseek-chat` and `deepseek-reasoner` no
-  longer exist. **Their prices in `config.py` are unconfirmed placeholders and
-  must be checked against https://deepseek.com/pricing before any cost figure
-  reaches `docs/findings.md`.**
+  longer exist.
+- **DeepSeek pricing is confirmed and the placeholder blocker is closed.**
+  Checked 2026-09-06 against https://api-docs.deepseek.com/quick_start/pricing:
+  flash $0.44/$1.32 per 1M, pro $1.32/$3.96, vision-exp $0.44/$1.32. DeepSeek
+  publishes four input rates per model (cache hit/miss × peak/off-peak, off-peak
+  being half of peak); the meter models neither caching nor time of day, so the
+  table records the **peak cache-miss** rate and every recorded cost is an upper
+  bound. The old placeholders understated flash by about 1.3×, so any cost
+  figure quoted from a run made before this date is low.
+- **The seeded archive in the local database is incomplete, and this blocks the
+  headline run.** Only 16 of the 40 committed seeds are in `attacks` at
+  `round_generated = 0`, holdout is 5.1% rather than the 20% `docs/spec.md` §10
+  requires, and the missing 24 have no `novelty_rejections` row — `crucible seed`
+  was interrupted before its nine checks could pass. Re-run `make seed` and
+  confirm every check before starting an experiment. Run `9fed94ea`'s `n=3`
+  holdout interval is a symptom of this, not of the holdout design.
 - **Second provider:** DeepSeek runs alongside Groq. Provider is chosen **per
   agent**; the assignment in `.env.example` still puts all four on Groq, because
   choosing where each agent runs is the operator's call after a smoke run.
@@ -166,8 +186,14 @@ work committed.
   **TODO(interpretation)** — is the operator's to write, not the code's.
   Suggested order: `main`, then the three ablations, then `layer_ablation`,
   `transfer`, `model_overlap`. `crucible experiment list` prints a wall-clock
-  estimate for each at 6500 TPM.
-- **Open issues / blockers:** none. Notes for whoever picks this up:
+  estimate for each at 6500 TPM. **`docs/handoff.md` carries the ordered plan,
+  the pre-flight, the cost budget and the two archive-baseline options; read it
+  first.**
+- **Open issues / blockers:** one — the incomplete seeded archive above; re-seed
+  before running anything. Notes for whoever picks this up:
+  - **`crucible findings regenerate` defaults to the most recent run**, and the
+    most recent row is an orphaned `running` run with zero rounds. Always pass
+    `--run-id <the run you mean>` when regenerating for publication.
   - `docs/spec.md` §7 wins over `project_context.md` on canary placement: one
     canary class per location, so the system prompt carries `SYSPROMPT_CANARY`
     only. Planting a second class there would make a system-prompt leak
